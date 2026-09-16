@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Плеер</title>
+<style>
+body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000);padding-bottom:150px}
+h3{margin:16px 12px 4px}
+.track{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
+.track:active,.track.active{background:var(--tg-theme-secondary-bg-color,#eee)}
+.track .t{flex:1;min-width:0}.t1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t2{opacity:.6;font-size:12px}
+#bar{position:fixed;bottom:0;left:0;right:0;background:var(--tg-theme-secondary-bg-color,#1c1d22);color:#fff;padding:10px 12px;display:none}
+#prog{height:4px;background:#555;margin:8px 0;border-radius:2px}#fill{height:100%;width:0;background:var(--tg-theme-button-color,#3390ec);border-radius:2px}
+button{background:var(--tg-theme-button-color,#3390ec);color:var(--tg-theme-button-text-color,#fff);border:0;border-radius:8px;padding:8px 14px;font-size:16px}
+</style></head><body>
+<h3>❤️ Избранное</h3><div id="favs"></div><h3>📁 Плейлисты</h3><div id="pls"></div>
+<div id="bar">
+  <div id="now" style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+  <div id="prog"><div id="fill"></div></div>
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button onclick="toggleShuffle()">🔀</button><button onclick="prev()">⏮</button>
+    <button id="pp" onclick="togglePlay()">⏸</button><button onclick="next(true)">⏭</button>
+  </div>
+</div>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
+const qs = `?initData=${encodeURIComponent(tg.initData)}`;
+let lib={favorites:[],playlists:[]}, queue=[], idx=-1, shuffle=false;
+const audio=new Audio(), $=id=>document.getElementById(id);
+audio.addEventListener("ended",()=>next(false));
+audio.addEventListener("timeupdate",()=>{ if(audio.duration) $("fill").style.width=(audio.currentTime/audio.duration*100)+"%"; });
+ $("prog").onclick=e=>{ if(audio.duration){ const r=$("prog").getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*audio.duration; } };
+const trackName=t=>(t.artist? t.artist+" — ":"")+t.title;
+async function load(){ const r=await fetch("/api/library"+qs); if(!r.ok){tg.showAlert("Ошибка авторизации");return;} lib=await r.json(); render(); }
+function row(list,i,name,sub){ const d=document.createElement("div"); d.className="track";
+  d.innerHTML=`<div class="t"><div class="t1">${name}</div>${sub?`<div class="t2">${sub}</div>`:""}</div>`;
+  d.onclick=()=>{ if(sub){ queue=list.tracks.slice(); idx=-1; shuffle?playAt(Math.floor(Math.random()*queue.length)):playAt(0); } else play(list,i); };
+  return d; }
+function render(){ const f=$("favs"); f.innerHTML="";
+  lib.favorites.forEach((t,i)=>f.appendChild(row(lib.favorites,i,trackName(t))));
+  const p=$("pls"); p.innerHTML="";
+  lib.playlists.forEach(pl=>p.appendChild(row(pl,0,"📁 "+pl.name,pl.tracks.length+" треков"))); }
+async function play(list,i){ queue=list.slice(); return playAt(i); }
+async function playAt(i){ if(!queue.length) return; idx=i; const t=queue[i];
+  document.querySelectorAll(".track").forEach(e=>e.classList.remove("active"));
+  $("now").textContent=trackName(t); $("bar").style.display="block";
+  audio.src=`/api/stream/${t.id}${qs}`;
+  try{ await audio.play(); $("pp").textContent="⏸"; }
+  catch(e){ tg.showAlert("Трек недоступен: сначала включи его один раз в чате"); } }
+function next(manual){ if(shuffle&&queue.length>1){ let r; do{r=Math.floor(Math.random()*queue.length);}while(r===idx); return playAt(r); }
+  if(idx+1<queue.length) playAt(idx+1); }
+function prev(){ if(audio.currentTime>3) audio.currentTime=0; else if(idx>0) playAt(idx-1); }
+function togglePlay(){ if(audio.paused){ audio.play(); $("pp").textContent="⏸"; } else { audio.pause(); $("pp").textContent="▶"; } }
+function toggleShuffle(){ shuffle=!shuffle; tg.HapticFeedback.impactOccurred("light"); }
+load();
+</script></body></html>

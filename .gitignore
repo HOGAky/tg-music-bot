@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Секреты (КРИТИЧНО!) ---
+.env
+.env.local
+*.token
+cookies.txt
+
+# --- Данные и логи ---
+data/
+*.db
+*.db-journal
+*.log
+*.log.*
+backups/
+downloads/
+
+# --- Редакторы/ОС ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

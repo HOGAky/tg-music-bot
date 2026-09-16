@@ -1,0 +1,8 @@
+services:
+  musicbot:
+    build: .
+    container_name: musicbot
+    restart: always          # автоперезапуск при падении и после ребута сервера
+    env_file: .env
+    volumes:
+      - ./data:/app/data     # база данных переживает пересоздание контейнера
