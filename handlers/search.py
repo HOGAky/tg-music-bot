@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router, F
 from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, Message
@@ -9,6 +11,8 @@ from database.session import SessionFactory
 from services import searcher, sender
 from utils import msg_of
 
+logger = logging.getLogger(__name__)
+
 router = Router(name="search")
 
 
@@ -16,8 +20,10 @@ router = Router(name="search")
 async def on_text(message: Message):
     """Любой текст = либо ссылка, либо поисковый запрос."""
     text = message.text.strip()
+    user_id = message.from_user.id
+    logger.info("user=%s запрос: %r (url=%s)", user_id, text, searcher.is_url(text))
     async with SessionFactory() as session:
-        await repo.get_or_create_user(session, message.from_user.id, message.from_user.username)
+        await repo.get_or_create_user(session, user_id, message.from_user.username)
 
         if searcher.is_url(text):
             status = await message.answer("🔗 Обрабатываю ссылку...")
@@ -27,9 +33,13 @@ async def on_text(message: Message):
             found = await searcher.search(text)
 
         if not found:
-            await status.delete()
+            try:
+                await status.delete()
+            except Exception as e:
+                logger.debug("Не удалось удалить статус-сообщение: %s", e)
             await message.answer(
-                "Ничего не нашёл 😔\nПоддерживаю: Spotify, YouTube, SoundCloud, Bandcamp и "
+                f"Ничего не нашёл по запросу <i>{text[:200]}</i> 😔\n"
+                "Поддерживаю: Spotify, YouTube, SoundCloud, Bandcamp и "
                 "поиск по названию. Попробуй изменить запрос."
             )
             return
@@ -40,7 +50,10 @@ async def on_text(message: Message):
                 duration=f.duration, download_url=f.download_url)
             for f in found
         ]
-        await status.delete()
+        try:
+            await status.delete()
+        except Exception as e:
+            logger.debug("Не удалось удалить статус-сообщение: %s", e)
 
         if len(tracks) == 1:
             t = tracks[0]
@@ -94,6 +107,7 @@ async def cb_fav(callback: CallbackQuery, callback_data: FavCB):
         try:
             await msg.edit_reply_markup(reply_markup=keyboards.track_kb(
                 track.id, in_fav, share_query=f"{track.artist} {track.title}".strip()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Не удалось обновить клавиатуру избранного user=%s track=%s: %s",
+                         callback.from_user.id, track.id, e)
     await callback.answer(note)

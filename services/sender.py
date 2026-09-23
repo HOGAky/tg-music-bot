@@ -1,3 +1,4 @@
+import logging
 import os
 
 from aiogram.types import FSInputFile, Message
@@ -5,6 +6,8 @@ from aiogram.types import FSInputFile, Message
 from database import repo
 from database.models import Track
 from services import downloader, player, searcher
+
+logger = logging.getLogger(__name__)
 
 
 def _dur(*values) -> int | None:
@@ -60,7 +63,9 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
             )
             await _track_played(session, user_id, track, queue_name, position, queue_size)
             return True
-        except Exception:  # file_id протух — перекачиваем
+        except Exception as e:
+            logger.warning("file_id трека %s (%s) протух, перекачиваем: %s",
+                           track.id, track.title, e)
             track.file_id = None
             await session.commit()
 
@@ -72,7 +77,9 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
     status = await msg.answer("⏳ Скачиваю трек...")
     try:
         result = await downloader.download(url, quality=quality)
-    except Exception:
+    except Exception as e:
+        logger.exception("Ошибка скачивания url=%s track=%s (%s): %s",
+                         url, track.id, track.title, e)
         await status.edit_text("⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска.")
         return False
 
@@ -89,17 +96,40 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
         reply_markup=reply_markup,
         protect_content=protect,
     )
+    audio_msg = None
     try:
         audio_msg = await msg.answer_audio(
             thumbnail=FSInputFile(result.thumbnail) if result.thumbnail else None, **kwargs)
-    except Exception:  # вдруг не понравилась обложка — отправим без неё
-        audio_msg = await msg.answer_audio(**kwargs)
-    finally:
+    except Exception as e:
+        logger.warning("Отправка с обложкой не удалась track=%s (%s): %s — пробую без обложки",
+                       track.id, track.title, e)
+        try:
+            audio_msg = await msg.answer_audio(**kwargs)
+        except Exception as e2:
+            logger.exception("Отправка трека в Telegram провалилась track=%s (%s): %s",
+                             track.id, track.title, e2)
+            try:
+                await status.edit_text("⚠️ Telegram отказался принимать трек 😔. Попробуй другой вариант.")
+            except Exception:
+                pass
+            return False
+        finally:
+            try:
+                await status.delete()
+            except Exception as del_e:
+                logger.debug("Не удалось удалить статус-сообщение: %s", del_e)
+            _cleanup(result.path, result.thumbnail)
+        # если попали сюда — у нас audio_msg, дойдём до общего кода ниже
+    else:
+        # успех с первого раза
         try:
             await status.delete()
-        except Exception:
-            pass
+        except Exception as del_e:
+            logger.debug("Не удалось удалить статус-сообщение: %s", del_e)
         _cleanup(result.path, result.thumbnail)
+
+    if audio_msg is None:
+        return False
 
     await repo.set_file_id(session, track.id, audio_msg.audio.file_id)
     await _track_played(session, user_id, track, queue_name, position, queue_size)

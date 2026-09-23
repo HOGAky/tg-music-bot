@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import ssl
+import threading
 from dataclasses import dataclass
 
 import aiohttp
@@ -18,10 +19,28 @@ URL_RE = re.compile(r"https?://\S+")
 # ДВЕ захватывающие группы: тип (track/album/playlist) и id
 SPOTIFY_RE = re.compile(r"(track|album|playlist)/([A-Za-z0-9]{22})")
 
-_ytm = YTMusic()
+_ytm: YTMusic | None = None
+_ytm_lock = threading.Lock()
 
 
 def ytmusic() -> YTMusic:
+    global _ytm
+    if _ytm is None:
+        with _ytm_lock:
+            if _ytm is None:
+                last_exc: Exception | None = None
+                for attempt in range(3):
+                    try:
+                        _ytm = YTMusic()
+                        break
+                    except Exception as e:
+                        last_exc = e
+                        logger.warning("YTMusic init attempt %s failed: %s", attempt + 1, e)
+                        if attempt < 2:
+                            import time
+                            time.sleep(0.5 * (attempt + 1))
+                if _ytm is None:
+                    raise RuntimeError(f"Не удалось инициализировать YTMusic: {last_exc}") from last_exc
     return _ytm
 
 
@@ -39,24 +58,56 @@ def is_url(text: str) -> bool:
 
 
 # ---------- поиск по названию (YouTube Music) ----------
-def _ytm_search_sync(query: str, limit: int) -> list[FoundTrack]:
-    results = _ytm.search(query, filter="songs", limit=limit) or []
-    out = []
-    for r in results:
+def _parse_ytm_results(results: list[dict], seen: set[str]) -> list[FoundTrack]:
+    out: list[FoundTrack] = []
+    for r in results or []:
         vid = r.get("videoId")
-        if not vid:
+        if not vid or vid in seen:
             continue
+        seen.add(vid)
         url = f"https://www.youtube.com/watch?v={vid}"
+        artists_raw = r.get("artists") or []
+        artist_names: list[str] = []
+        for a in artists_raw:
+            name = a.get("name") if isinstance(a, dict) else None
+            if name:
+                artist_names.append(name)
         out.append(FoundTrack(
             title=r.get("title", ""),
-            artist=", ".join(a["name"] for a in r.get("artists", [])),
+            artist=", ".join(artist_names),
             source_url=url, duration=r.get("duration_seconds"), download_url=url,
         ))
     return out
 
 
+def _ytm_search_sync(query: str, limit: int) -> list[FoundTrack]:
+    ytm = ytmusic()
+    seen: set[str] = set()
+    out: list[FoundTrack] = []
+    # Порядок фильтров: сначала официальные треки, потом видео, потом вообще всё
+    for filter_val in ("songs", "videos", None):
+        need = limit - len(out)
+        if need <= 0:
+            break
+        try:
+            results = ytm.search(query, filter=filter_val, limit=max(need, limit)) or []
+        except Exception as e:
+            logger.exception("YTMusic search failed (query=%r, filter=%s): %s", query, filter_val, e)
+            continue
+        out.extend(_parse_ytm_results(results, seen))
+    if not out:
+        logger.warning("YTMusic ничего не нашёл по запросу: %r", query)
+    else:
+        logger.info("YTMusic поиск %r -> %s треков", query, len(out))
+    return out[:limit]
+
+
 async def search(query: str, limit: int = 8) -> list[FoundTrack]:
-    return await asyncio.to_thread(_ytm_search_sync, query, limit)
+    try:
+        return await asyncio.to_thread(_ytm_search_sync, query, limit)
+    except Exception as e:
+        logger.exception("Ошибка поиска по %r: %s", query, e)
+        return []
 
 
 # ---------- метаданные для "прочих" ссылок через yt-dlp ----------
@@ -70,14 +121,17 @@ def _probe_sync(url: str) -> FoundTrack:
         if "entries" in info:
             info = next((e for e in info["entries"] if e), info)
         raw_duration = info.get("duration")
+        title = info.get("title") or url
+        artist = info.get("uploader") or ""
         return FoundTrack(
-            title=info.get("title") or url,
-            artist=info.get("uploader") or "",
+            title=title,
+            artist=artist,
             source_url=info.get("webpage_url") or url,
-            duration=int(raw_duration) if raw_duration else None,  # float недопустим!
+            duration=int(raw_duration) if raw_duration else None,
             download_url=info.get("webpage_url") or url,
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("yt-dlp probe не смог обработать %r: %s", url, e)
         return FoundTrack(title=url, artist="", source_url=url, download_url=url)
 
 
@@ -149,14 +203,23 @@ async def _spotify_via_oembed(url: str) -> list[FoundTrack]:
                        "(обычно антивирус/прокси подменяет TLS). Повтор без проверки SSL.")
         try:
             data = await _fetch_oembed(url, False)
-        except aiohttp.ClientError:
+        except aiohttp.ClientError as e:
+            logger.warning("Spotify oembed fallback с отключённым SSL тоже упал: %s", e)
             return []
-    except aiohttp.ClientError:
+    except aiohttp.ClientError as e:
+        logger.warning("Spotify oembed недоступен: %s", e)
         return []
     title = (data or {}).get("title")
     if not title:
+        logger.warning("Spotify oembed вернул пустой title для %s", url)
         return []
-    return [FoundTrack(title=title, artist="", source_url=url)]
+    # Пытаемся вытащить исполнителя из поля author_name, если оно есть
+    artist = ""
+    if isinstance(data, dict):
+        author = data.get("author_name")
+        if isinstance(author, str) and author:
+            artist = author
+    return [FoundTrack(title=title, artist=artist, source_url=url)]
 
 
 async def resolve_url(url: str) -> list[FoundTrack]:
@@ -164,6 +227,7 @@ async def resolve_url(url: str) -> list[FoundTrack]:
     if "spotify.com" in url:
         m = SPOTIFY_RE.search(url)
         if not m:
+            logger.warning("Spotify ссылка не распознана: %s", url)
             return []
         kind, sid = m.groups()
         if config.SPOTIFY_CLIENT_ID:
@@ -171,10 +235,12 @@ async def resolve_url(url: str) -> list[FoundTrack]:
                 if kind == "track":
                     return [await asyncio.to_thread(_sp_track_sync, sid)]
                 return await asyncio.to_thread(_sp_collection_sync, kind, sid)
-            except Exception:
-                pass  # упадём в oembed-fallback ниже
+            except Exception as e:
+                logger.warning("Spotify API ошибка (%s/%s): %s. Переходим в oembed fallback.",
+                               kind, sid, e)
         if kind == "track":
             return await _spotify_via_oembed(url)
+        logger.warning("Spotify %s без API ключа не поддерживается (нужен client_id)", kind)
         return []
     # YouTube / YouTube Music / SoundCloud / Bandcamp / ... — всё, что умеет yt-dlp
     return [await asyncio.to_thread(_probe_sync, url)]

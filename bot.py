@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -13,12 +14,35 @@ from handlers import common, favorites, inline, player, playlists, search, track
 from webapp.app import start_webapp
 
 
-async def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+def _setup_logging() -> None:
+    os.makedirs("logs", exist_ok=True)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # собираем всё, фильтр по хендлерам
+    root_logger.handlers.clear()
+
+    fmt = logging.Formatter("%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
+
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(fmt)
+    root_logger.addHandler(console)
+
+    file_handler = RotatingFileHandler(
+        "logs/musicbot.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8",
     )
-    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(fmt)
+    root_logger.addHandler(file_handler)
+
+    # Уменьшаем шум от сторонних библиотек
+    for name in ("aiogram.event", "aiohttp.access", "aiohttp.client", "urllib3", "httpx"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+async def main() -> None:
+    _setup_logging()
+    logging.info("=== musicbot запускается ===")
 
     os.makedirs("data", exist_ok=True)
     os.makedirs(config.CACHE_DIR, exist_ok=True)
@@ -44,12 +68,13 @@ async def main() -> None:
     runner = None
     if config.API_ENABLED:
         runner = await start_webapp()
+        logging.info("WebApp HTTP-сервер включён: %s:%s", config.API_HOST, config.API_PORT)
     if config.WEBAPP_URL:
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(text="🎵 Плеер", web_app=WebAppInfo(url=config.WEBAPP_URL)))
 
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Бот запущен")
+    logging.info("Бот запущен и готов к приёму сообщений")
     try:
         await dp.start_polling(bot)
     finally:
@@ -61,4 +86,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Бот остановлен")
+        logging.info("Бот остановлен пользователем")
+    except Exception:
+        logging.exception("Фатальная ошибка при старте/работе бота")
+        raise

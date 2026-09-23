@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router
 from aiogram.types import CallbackQuery
 
@@ -7,6 +9,8 @@ from database import repo
 from database.session import SessionFactory
 from services import lyrics, radio
 from utils import msg_of
+
+logger = logging.getLogger(__name__)
 
 router = Router(name="track_tools")
 
