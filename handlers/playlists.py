@@ -214,7 +214,10 @@ async def cb_play_all(callback: CallbackQuery, callback_data: PlayAllCB):
             if track is None:
                 continue
             in_fav = await repo.is_favorite(session, callback.from_user.id, track.id)
-            await sender.send_track(msg, session, track, keyboards.track_kb(track.id, in_fav))
+            await sender.send_track(
+                msg, session, track, keyboards.track_kb(track.id, in_fav),
+                user_id=callback.from_user.id, queue_name=pl.name,
+                position=i, queue_size=len(tracks))
         if i < len(tracks):
             await asyncio.sleep(1.0)  # защита от rate limit Telegram
     try:

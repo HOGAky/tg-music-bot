@@ -21,6 +21,10 @@ SPOTIFY_RE = re.compile(r"(track|album|playlist)/([A-Za-z0-9]{22})")
 _ytm = YTMusic()
 
 
+def ytmusic() -> YTMusic:
+    return _ytm
+
+
 @dataclass
 class FoundTrack:
     title: str

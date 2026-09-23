@@ -45,7 +45,10 @@ async def on_text(message: Message):
         if len(tracks) == 1:
             t = tracks[0]
             in_fav = await repo.is_favorite(session, message.from_user.id, t.id)
-            await sender.send_track(message, session, t, keyboards.track_kb(t.id, in_fav))
+            await sender.send_track(
+                message, session, t,
+                keyboards.track_kb(t.id, in_fav, share_query=f"{t.artist} {t.title}".strip()),
+                user_id=message.from_user.id)
         else:
             what = "треков" if len(tracks) > 1 else "трек"
             await message.answer(f"🎧 Нашёл {len(tracks)} {what} — выбирай:",
@@ -65,7 +68,11 @@ async def cb_play(callback: CallbackQuery, callback_data: PlayCB):
             await callback.answer("Трек не найден", show_alert=True)
             return
         in_fav = await repo.is_favorite(session, callback.from_user.id, track.id)
-        await sender.send_track(msg, session, track, keyboards.track_kb(track.id, in_fav))
+        await sender.send_track(
+            msg, session, track,
+            keyboards.track_kb(track.id, in_fav,
+                               share_query=f"{track.artist} {track.title}".strip()),
+            user_id=callback.from_user.id)
 
 
 @router.callback_query(FavCB.filter())
@@ -85,7 +92,8 @@ async def cb_fav(callback: CallbackQuery, callback_data: FavCB):
     msg = msg_of(callback)
     if msg is not None:
         try:
-            await msg.edit_reply_markup(reply_markup=keyboards.track_kb(track.id, in_fav))
+            await msg.edit_reply_markup(reply_markup=keyboards.track_kb(
+                track.id, in_fav, share_query=f"{track.artist} {track.title}".strip()))
         except Exception:
             pass
     await callback.answer(note)
