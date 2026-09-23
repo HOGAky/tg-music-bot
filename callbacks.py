@@ -49,3 +49,19 @@ class PlDelTrackCB(CallbackData, prefix="pldt"):
 
 class PlayAllCB(CallbackData, prefix="pa"):
     playlist_id: int
+
+
+class LyricsCB(CallbackData, prefix="ly"):
+    track_id: int
+
+
+class RadioCB(CallbackData, prefix="rad"):
+    track_id: int
+
+
+class SetQualityCB(CallbackData, prefix="sq"):
+    quality: int
+
+
+class SetProtectCB(CallbackData, prefix="sp"):
+    pass

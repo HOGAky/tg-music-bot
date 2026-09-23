@@ -2,21 +2,44 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Favorite, Playlist, PlaylistTrack, Track, User
+from database.models import Favorite, Playlist, PlaylistTrack, Track, TrackPlay, User
 
 MAX_PLAYLIST_TRACKS = 50
 MAX_PLAYLISTS = 20
+QUALITIES = (128, 192, 320)
 
 
 # ---------- users ----------
-async def get_or_create_user(session: AsyncSession, tg_id: int, username: str | None) -> None:
+async def get_or_create_user(session: AsyncSession, tg_id: int, username: str | None) -> User:
     user = await session.get(User, tg_id)
     if user is None:
-        session.add(User(id=tg_id, username=username))
+        user = User(id=tg_id, username=username)
+        session.add(user)
         await session.commit()
     elif user.username != username:
         user.username = username
         await session.commit()
+    return user
+
+
+async def get_user(session: AsyncSession, tg_id: int) -> User | None:
+    return await session.get(User, tg_id)
+
+
+async def set_quality(session: AsyncSession, tg_id: int, quality: int) -> None:
+    user = await session.get(User, tg_id)
+    if user is not None and quality in QUALITIES:
+        user.quality = quality
+        await session.commit()
+
+
+async def toggle_protect_content(session: AsyncSession, tg_id: int) -> bool:
+    user = await session.get(User, tg_id)
+    if user is None:
+        return False
+    user.protect_content = not user.protect_content
+    await session.commit()
+    return user.protect_content
 
 
 # ---------- tracks ----------
@@ -53,6 +76,22 @@ async def set_file_id(session: AsyncSession, track_id: int, file_id: str) -> Non
     if track is not None:
         track.file_id = file_id
         await session.commit()
+
+
+# ---------- статистика прослушиваний ----------
+async def log_play(session: AsyncSession, user_id: int, track_id: int) -> None:
+    session.add(TrackPlay(user_id=user_id, track_id=track_id))
+    await session.commit()
+
+
+async def top_tracks(session: AsyncSession, limit: int = 10,
+                     user_id: int | None = None) -> list[tuple[Track, int]]:
+    plays = func.count(TrackPlay.id).label("plays")
+    stmt = (select(Track, plays).join(TrackPlay, TrackPlay.track_id == Track.id)
+            .group_by(Track.id).order_by(plays.desc()).limit(limit))
+    if user_id is not None:
+        stmt = stmt.where(TrackPlay.user_id == user_id)
+    return [(track, count) for track, count in (await session.execute(stmt)).all()]
 
 
 # ---------- favorites ----------
@@ -120,6 +159,15 @@ async def add_track_to_playlist(session: AsyncSession, playlist_id: int, track_i
     session.add(PlaylistTrack(playlist_id=playlist_id, track_id=track_id, position=cnt or 0))
     await session.commit()
     return True
+
+
+async def search_cached_tracks(session: AsyncSession, query: str, limit: int = 20) -> list[Track]:
+    """Треки с готовым file_id — только их можно отдать в inline-режиме."""
+    stmt = select(Track).where(Track.file_id.is_not(None))
+    if query:
+        pattern = f"%{query}%"
+        stmt = stmt.where(Track.title.ilike(pattern) | Track.artist.ilike(pattern))
+    return list((await session.scalars(stmt.order_by(Track.id.desc()).limit(limit))).all())
 
 
 async def remove_track_from_playlist(session: AsyncSession, playlist_id: int, track_id: int) -> None:

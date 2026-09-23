@@ -1,6 +1,6 @@
 # 🎵 tg-music-bot
 
-Telegram-бот для поиска, скачивания и прослушивания музыки. Полностью асинхронный, с веб-плеером (Mini App), фоновыми очередями, голосовым поиском, текстами песен, радио и автоматизацией 24/7.
+Telegram-бот для поиска, скачивания и прослушивания музыки. Полностью асинхронный, с веб-плеером (Mini App), текстами песен, радио и inline-режимом.
 
 > ⚠️ Дисклеймер: скачивание защищённой авторским правом музыки может нарушать ToS YouTube/Spotify и законы вашей страны. Бот предназначен для личного и образовательного использования. Авторы не несут ответственности за misuse.
 
@@ -12,44 +12,35 @@ Telegram-бот для поиска, скачивания и прослушив�
 - Текстовый поиск по названию/артисту
 - Ссылки на YouTube / YouTube Music / SoundCloud / Spotify
 - Источники: YT Music (основной), SoundCloud (fallback), yt-dlp (скачивание)
-- Умный подбор лучшего результата через rapidfuzz (название + артист + длительность)
 - Кэш file_id — повторные запросы не качают заново
-- LRU-очистка кэша плеера (лимит 1.5 ГБ)
+- LRU-очистка локального кэша mp3 (лимит 1.5 ГБ)
 
 ### ▶️ Воспроизведение
-- Фоновая очередь треков: ⏭ далее / 🔀 shuffle / ⏹ стоп / ⏱ sleep-timer (+1/+3/+5)
-- /now — что сейчас играет и позиция в очереди
+- /now — что сейчас играет и позиция в очереди плейлиста
 - Избранное (❤️) и плейлисты (создание, добавление, удаление)
-- Пагинация результатов поиска (по 8 на страницу)
+- Пагинация результатов поиска
 
 ### 🎤 Доп. фишки
-- Inline-режим — @твойбот запрос в любом чате → трек прямо туда
-- Голосовой поиск — отправьте voice с играющей песней, бот распознает (faster-whisper, опционально)
+- Inline-режим — @твойбот запрос в любом чате (только уже закэшированные треки)
 - 📝 Текст песни — через LRCLIB (без ключей)
-- 📻 Радио — очередь похожей музыки (Deezer + YT fallback)
-- ID3-теги + обложка 600×600 из iTunes Search API
-- ⚙️ Настройки: качество 128/192/320 kbps, защита контента от пересылки
+- 📻 Радио — похожие треки из YT Music (watch playlist + поиск как fallback)
+- ⚙️ /settings — качество 128/192/320 kbps, защита контента от пересылки
 - 🏆 /top — глобальный и личный топ треков
-- 🔥 Message effects в приватных чатах
 
 ### 📱 Mini App (веб-плеер)
-- Кнопка меню в Telegram → открывает веб-плеер
-- Вкладки «Избранное» / «Плейлисты» / поиск
-- Стриминг mp3 с сервера, тема под Telegram
+- Включается через `API_ENABLED=true`; при заданном `WEBAPP_URL` бот ставит кнопку меню
+- Избранное и плейлисты, стриминг mp3, тема под Telegram
+- Авторизация по подписи Telegram WebApp initData
 - /healthz — healthcheck для мониторинга
 
-### 🛠 Автоматизация 24/7
-- Вечный сторож start_bot.bat — авто-рестарт + уведомления о крашах
-- Самоисцеляющийся туннель start_tunnel.ps1 — авто-обновление WEBAPP_URL
-- Ночное обновление yt-dlp и др. (update_deps.bat в 04:00)
-- Ежедневный бэкап БД (backup_db.ps1 в 04:30, хранит 14 дней)
+Пока не реализовано: голосовой поиск, ID3-теги/обложки, sleep-timer, поиск внутри Mini App, скрипты автоматизации 24/7.
 
 ---
 
 ## 🏗 Архитектура
 
 tg-music-bot/
-├── bot.py                  # Entrypoint: Bot+Dispatcher, loguru, graceful shutdown
+├── bot.py                  # Entrypoint: Bot+Dispatcher, запуск Mini App
 ├── config.py               # pydantic-settings Config
 ├── texts.py                # RU-шаблоны сообщений
 ├── utils.py                # helpers: short(), pack_query, msg_of, safe_edit
@@ -60,47 +51,32 @@ tg-music-bot/
 │
 ├── database/
 │   ├── models.py           # SQLAlchemy 2 Mapped: User, Track, Favorite, Playlist,
-│   │                       #   PlaylistTrack, TrackPlay, Settings
+│   │                       #   PlaylistTrack, TrackPlay
 │   ├── repo.py             # async CRUD
 │   └── session.py          # engine + SessionFactory + init_db()
 │
 ├── services/
 │   ├── searcher.py         # YT Music + SoundCloud + resolve_url (yt-dlp + spotipy)
 │   ├── downloader.py       # yt-dlp + semaphore + LRU кэш
-│   ├── sender.py           # send_track + FIRE_EFFECT
-│   ├── player.py           # PlayerSession (очередь, shuffle, sleep-timer)
-│   ├── matcher.py          # pick_best через rapidfuzz
-│   ├── tagger.py           # ID3 + обложки из iTunes
+│   ├── sender.py           # send_track (качество, protect_content, статистика)
+│   ├── player.py           # now playing по пользователям
 │   ├── lyrics.py           # LRCLIB
-│   └── radio.py            # Deezer
+│   └── radio.py            # похожие треки из YT Music
 │
 ├── handlers/
-│   ├── common.py           # /start, /help, deep-link
+│   ├── common.py           # /start, /help
 │   ├── search.py           # поиск + пагинация
-│   ├── player.py           # /now, очередь, sleep-timer
+│   ├── player.py           # /now, /top, /settings
 │   ├── playlists.py        # /playlists, /new
 │   ├── favorites.py        # /fav, ❤️
 │   ├── inline.py           # inline-режим
-│   ├── voice.py            # голосовой поиск
-│   ├── track_tools.py      # 📝 тексты, 📻 радио
-│   ├── settings.py         # /settings
-│   └── stats.py            # /top
+│   └── track_tools.py      # 📝 тексты, 📻 радио
 │
-├── middlewares/
-│   └── throttle.py         # anti-flood (5 событий / 4 сек)
-│
-├── webapp/
-│   ├── app.py              # FastAPI: /app/, /stream/{id}, /api/tracks, /healthz
-│   └── static/index.html   # веб-плеер
-│
-└── scripts/                # Windows-автопилот 24/7
-    ├── start_bot.bat
-    ├── kill_bot.ps1
-    ├── update_deps.bat
-    ├── backup_db.ps1
-    └── start_tunnel.ps1
+└── webapp/
+    ├── app.py              # aiohttp: /app, /api/library, /api/stream/{id}, /healthz
+    └── static/index.html   # веб-плеер
 
-Async-стек: aiogram 3 · SQLAlchemy 2 async + aiosqlite · FastAPI · uvicorn · loguru
+Async-стек: aiogram 3 · SQLAlchemy 2 async + aiosqlite · aiohttp · yt-dlp
 
 ---
 
@@ -160,35 +136,13 @@ MAX_CONCURRENT_DOWNLOADS=2
 
 ---
 
-## 🌐 Деплой 24/7
+## 🌐 Mini App
 
-### Вариант А — Домашний ноут (Windows)
+1. `API_ENABLED=true` в .env — бот поднимет aiohttp на `API_HOST:API_PORT`.
+2. Прокинуть публичный HTTPS (туннель или reverse proxy) и указать `WEBAPP_URL=https://.../app/`.
+3. При старте бот сам ставит кнопку меню «🎵 Плеер».
 
-Бесплатно, но зависит от питания/интернета/туннеля. Полная инструкция — в scripts/README.md.
-
-Кратко:
-1. Настроить питание: крышка → «Действие не предпринимать», сон → «Никогда».
-2. Создать 4 задачи в Планировщике (taskschd.msc):
-
-| Задача | Триггер | Действие |
-|---|---|---|
-| MusicBot | При запуске системы | scripts\start_bot.bat |
-| MusicTunnel | При запуске системы | powershell -File scripts\start_tunnel.ps1 |
-| MusicUpdate | Ежедневно 04:00 | scripts\update_deps.bat |
-| MusicBackup | Ежедневно 04:30 | powershell -File scripts\backup_db.ps1 |
-
-3. В .env указать ADMIN_TELEGRAM_ID (узнать у @userinfobot) — будете получать уведомления о рестартах/крашах.
-
-### Вариант Б — VPS (Docker)
-
-Стабильно, ~400₽/мес, не зависит от домашних условий.
-
-git clone https://github.com/HOGAky/tg-music-bot.git
-cd tg-music-bot
-cp .env.example .env  # заполнить
-docker compose up -d --build
-
-Caddy автоматически выпустит Let's Encrypt-сертификат. В Caddyfile поменяйте домен на свой.
+API принимает только запросы с корректной подписью initData, иначе 401.
 
 ---
 
@@ -226,24 +180,25 @@ pytest
 - Favorite — избранное (unique user+track)
 - Playlist / PlaylistTrack — плейлисты
 - TrackPlay — лог прослушиваний (для /top)
-- Settings — per-user настройки (quality, protect_content)
+
+Настройки (quality, protect_content) хранятся полями User.
 
 ---
 
 ## 🩺 Известные ограничения
 
 - SQLite single-instance — потолок параллелизма; для масштаба нужен PostgreSQL.
-- yt-dlp ломается раз в 2 недели — ночные обновления (update_deps.bat) mitigating, но не гарантируют.
-- Webapp без авторизации — любой с URL туннеля может пользоваться плеером. TODO: валидация Telegram initData HMAC.
-- faster-whisper "tiny" плохо распознаёт напевание — лучше для записанного аудио. Альтернатива: AcoustID/Chromaprint (Shazam-mode).
+- yt-dlp ломается раз в 2 недели — нужны регулярные обновления зависимостей.
+- Смена качества в /settings влияет только на новые загрузки: уже закэшированный file_id отдаётся как есть.
+- /now хранится в памяти процесса и сбрасывается при рестарте бота.
 - Inline-кэш показывает только треки, которые кто-то уже слушал через бота — ограничение Telegram (бот не отдаёт файл, которого у него нет).
 
 ---
 
 ## 🗺 Roadmap
 
-- [ ] Авторизация веб-плеера через Telegram initData (HMAC)
-- [ ] Shazam-режим (AcoustID + chromaprint)
+- [x] Авторизация веб-плеера через Telegram initData (HMAC)
+- [ ] Голосовой поиск и Shazam-режим (AcoustID + chromaprint)
 - [ ] Telegram Stars premium-тир (приоритетная очередь, 320 по умолчанию)
 - [ ] Совместные плейлисты (deep-link инвайты)
 - [ ] Redis для FSM + кэш поиска (мультиинстанс)
@@ -269,11 +224,8 @@ MIT — см. LICENSE.
 - aiogram — async Telegram Bot API framework
 - yt-dlp — загрузка медиа
 - LRCLIB — тексты песен
-- Deezer API — радио
-- iTunes Search API — обложки
+- ytmusicapi — поиск и радио
 - Cloudflare / localhost.run — туннели
-- faster-whisper — распознавание голоса
-- loguru — логирование
 
 
 ВСЕ ВКЛЮЧАЯ ЭТОТ README СОЗДАНО С ПОМОЩЬЮ z.ai, в образовательных целях.

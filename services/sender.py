@@ -2,10 +2,9 @@ import os
 
 from aiogram.types import FSInputFile, Message
 
-from config import config
 from database import repo
 from database.models import Track
-from services import downloader, searcher
+from services import downloader, player, searcher
 
 
 def _dur(*values) -> int | None:
@@ -31,8 +30,23 @@ async def ensure_download_url(session, track: Track) -> str | None:
     return track.download_url
 
 
-async def send_track(msg: Message, session, track: Track, reply_markup=None) -> bool:
+async def _track_played(session, user_id: int | None, track: Track,
+                        queue_name: str, position: int, queue_size: int) -> None:
+    if user_id is None:
+        return
+    player.set_now_playing(user_id, track, queue_name=queue_name,
+                           position=position, queue_size=queue_size)
+    await repo.log_play(session, user_id, track.id)
+
+
+async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
+                     user_id: int | None = None, queue_name: str = "",
+                     position: int = 0, queue_size: int = 0) -> bool:
     """Отправка трека: сначала пробуем кеш file_id, иначе качаем. После — чистим диск."""
+    user = await repo.get_user(session, user_id) if user_id is not None else None
+    protect = bool(user.protect_content) if user is not None else False
+    quality = user.quality if user is not None else 192
+
     # 1) мгновенная отправка из кеша Telegram
     if track.file_id:
         try:
@@ -42,7 +56,9 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None) -> 
                 performer=(track.artist or "Unknown")[:64],
                 duration=_dur(track.duration),
                 reply_markup=reply_markup,
+                protect_content=protect,
             )
+            await _track_played(session, user_id, track, queue_name, position, queue_size)
             return True
         except Exception:  # file_id протух — перекачиваем
             track.file_id = None
@@ -55,7 +71,7 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None) -> 
 
     status = await msg.answer("⏳ Скачиваю трек...")
     try:
-        result = await downloader.download(url)
+        result = await downloader.download(url, quality=quality)
     except Exception:
         await status.edit_text("⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска.")
         return False
@@ -71,6 +87,7 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None) -> 
         performer=(track.artist or "Unknown")[:64],
         duration=_dur(track.duration, result.duration),
         reply_markup=reply_markup,
+        protect_content=protect,
     )
     try:
         audio_msg = await msg.answer_audio(
@@ -85,6 +102,7 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None) -> 
         _cleanup(result.path, result.thumbnail)
 
     await repo.set_file_id(session, track.id, audio_msg.audio.file_id)
+    await _track_played(session, user_id, track, queue_name, position, queue_size)
     return True
 
 

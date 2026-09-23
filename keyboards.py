@@ -1,8 +1,10 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from callbacks import (FavCB, FavDelCB, PlayAllCB, PlayCB, PlAddQCB, PlAddTrackCB,
-                       PlDelCB, PlDelTrackCB, PlMenuCB, PlNewCB, PlSelCB, PlViewCB)
-from database.models import Playlist, Track
+from callbacks import (FavCB, FavDelCB, LyricsCB, PlayAllCB, PlayCB, PlAddQCB, PlAddTrackCB,
+                       PlDelCB, PlDelTrackCB, PlMenuCB, PlNewCB, PlSelCB, PlViewCB,
+                       RadioCB, SetProtectCB, SetQualityCB)
+from database.models import Playlist, Track, User
+from database.repo import QUALITIES
 from utils import short
 
 
@@ -17,13 +19,34 @@ def results_kb(tracks: list[Track]) -> InlineKeyboardMarkup:
     ])
 
 
-def track_kb(track_id: int, in_fav: bool) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def track_kb(track_id: int, in_fav: bool, share_query: str = "") -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(
             text="💔 Убрать из избранного" if in_fav else "❤️ В избранное",
             callback_data=FavCB(track_id=track_id).pack())],
+        [
+            InlineKeyboardButton(text="📝 Текст", callback_data=LyricsCB(track_id=track_id).pack()),
+            InlineKeyboardButton(text="📻 Радио", callback_data=RadioCB(track_id=track_id).pack()),
+        ],
         [InlineKeyboardButton(text="📁 Добавить в плейлист",
                               callback_data=PlSelCB(track_id=track_id).pack())],
+    ]
+    if share_query:
+        rows.append([InlineKeyboardButton(text="↗️ Поделиться",
+                                          switch_inline_query=short(share_query, 60))])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_kb(user: User) -> InlineKeyboardMarkup:
+    quality_row = [
+        InlineKeyboardButton(text=("✅ " if user.quality == q else "") + f"{q} kbps",
+                             callback_data=SetQualityCB(quality=q).pack())
+        for q in QUALITIES
+    ]
+    protect = "🔒 Защита от пересылки: вкл" if user.protect_content else "🔓 Защита от пересылки: выкл"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        quality_row,
+        [InlineKeyboardButton(text=protect, callback_data=SetProtectCB().pack())],
     ])
 
 
