@@ -120,17 +120,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 copy .env.example .env
-notepad .env   # заполнить BOT_TOKEN, ADMIN_TELEGRAM_ID
+notepad .env   # заполнить BOT_TOKEN
 
 ### Минимальный .env
 
 BOT_TOKEN=123456:ABC-ваш-токен-от-BotFather
-ADMIN_TELEGRAM_ID=0
-API_ENABLED=true
-API_HOST=0.0.0.0
-API_PORT=8080
-WEBAPP_URL=
-DB_PATH=data/musicbot.db
+DB_URL=sqlite+aiosqlite:///data/musicbot.db
 CACHE_DIR=data/cache
 MAX_CONCURRENT_DOWNLOADS=2
 
@@ -202,14 +197,15 @@ Caddy автоматически выпустит Let's Encrypt-сертифик
 | Переменная | Тип | По умолчанию | Описание |
 |---|---|---|---|
 | BOT_TOKEN | str | — | Токен от @BotFather (обязательно) |
-| ADMIN_TELEGRAM_ID | int | 0 | Ваш Telegram ID для уведомлений |
-| API_ENABLED | bool | true | Запускать FastAPI Mini App |
+| SPOTIFY_CLIENT_ID | str | "" | Spotify API (иначе fallback через oembed) |
+| SPOTIFY_CLIENT_SECRET | str | "" | Spotify API |
+| API_ENABLED | bool | false | Запускать Mini App |
 | API_HOST | str | 0.0.0.0 | Хост веб-плеера |
 | API_PORT | int | 8080 | Порт веб-плеера |
 | WEBAPP_URL | str | "" | Публичный HTTPS-адрес плеера (<host>/app/) |
-| DB_PATH | str | data/musicbot.db | Путь к SQLite |
-| CACHE_DIR | str | data/cache | Кэш mp3 |
-| MAX_CONCURRENT_DOWNLOADS | int | 2 | Лимит параллельных yt-dlp |
+| DB_URL | str | sqlite+aiosqlite:///data/musicbot.db | SQLAlchemy-строка подключения |
+| CACHE_DIR | str | downloads | Кэш mp3 |
+| MAX_CONCURRENT_DOWNLOADS | int | 4 | Лимит параллельных yt-dlp |
 
 ---
 
