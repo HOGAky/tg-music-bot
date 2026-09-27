@@ -1,17 +1,22 @@
 import asyncio
 import logging
+import os
+import re
 import secrets
+import shutil
+import tempfile
 import time
+import zipfile
 
 from aiogram import Router, F
 from aiogram.filters import StateFilter
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message
 
 import keyboards
 from callbacks import DlAllCB, DlStopCB, FavCB, PlayCB
 from database import repo
 from database.session import SessionFactory
-from services import searcher, sender
+from services import downloader, searcher, sender
 from utils import msg_of, short
 
 logger = logging.getLogger(__name__)
@@ -22,6 +27,9 @@ router = Router(name="search")
 # ключ -> {"user_id", "ids", "cancel", "busy", "ts"}; живёт в памяти процесса
 _batches: dict[str, dict] = {}
 BATCH_TTL = 6 * 3600.0
+
+ZIP_THRESHOLD = 50        # больше треков — отдаём zip-архивами вместо сообщений
+ZIP_PART_LIMIT = 40 * 1024 * 1024  # запас до лимита Telegram в 50 МБ на файл
 
 
 def _register_batch(user_id: int, track_ids: list[int]) -> str:
@@ -84,9 +92,11 @@ async def on_text(message: Message):
             # ссылка на альбом/плейлист: предлагаем скачать всё целиком
             key = _register_batch(message.from_user.id, [t.id for t in tracks])
             shown = min(len(tracks), keyboards.COLLECTION_SHOWN)
+            zip_note = ("\n\n📦 Треков больше 50 — «Скачать все» пришлёт их zip-архивами "
+                        "по ~40 МБ, чтобы ничего не потерялось.") if len(tracks) > ZIP_THRESHOLD else ""
             await message.answer(
                 f"🎧 Плейлист из <b>{len(tracks)}</b> треков — можно скачать всё разом "
-                f"или слушать по одному (первые {shown}):",
+                f"или слушать по одному (первые {shown}):{zip_note}",
                 reply_markup=keyboards.collection_kb(tracks, key))
         else:
             what = "треков" if len(tracks) > 1 else "трек"
@@ -155,39 +165,54 @@ async def cb_download_all(callback: CallbackQuery, callback_data: DlAllCB):
     ids: list[int] = batch["ids"]
     total = len(ids)
     await callback.answer("⏬ Начинаю")
-    progress = await msg.answer(f"⏬ Скачиваю плейлист: 0/{total}",
-                                reply_markup=keyboards.stop_kb(callback_data.key))
+
+    async with SessionFactory() as session:
+        user = await repo.get_user(session, callback.from_user.id)
+    quality = user.quality if user is not None else 192
+    protect = bool(user.protect_content) if user is not None else False
+
+    progress = await msg.answer(
+        f"⬇️ Скачиваю {total} треков" + (" в zip-архивы…" if total > ZIP_THRESHOLD else "…"),
+        reply_markup=keyboards.stop_kb(callback_data.key))
+
+    zip_mode = total > ZIP_THRESHOLD
+    parts = 0
     sent = failed = 0
-    for i, track_id in enumerate(ids, 1):
-        if batch["cancel"]:
-            break
-        async with SessionFactory() as session:
-            track = await repo.get_track(session, track_id)
-            if track is None:
-                failed += 1
-                continue
-            try:  # имя трека в прогресс до (возможно долгого) скачивания
-                await progress.edit_text(f"⬇️ [{i}/{total}] {short(track.title, 40)}")
-            except Exception:
-                pass
-            in_fav = await repo.is_favorite(session, callback.from_user.id, track.id)
-            ok = await sender.send_track(
-                msg, session, track,
-                keyboards.track_kb(track.id, in_fav,
-                                   share_query=f"{track.artist} {track.title}".strip()),
-                user_id=callback.from_user.id, queue_name="Плейлист",
-                position=i, queue_size=total,
-                status=progress, quiet=True)
-        sent, failed = (sent + 1, failed) if ok else (sent, failed + 1)
-        if i < total:
-            await asyncio.sleep(1.0)  # защита от rate limit Telegram
+    if zip_mode:
+        sent, failed, parts = await _run_zip_batch(msg, progress, batch, ids, quality, protect)
+    else:
+        for i, track_id in enumerate(ids, 1):
+            if batch["cancel"]:
+                break
+            async with SessionFactory() as session:
+                track = await repo.get_track(session, track_id)
+                if track is None:
+                    failed += 1
+                    continue
+                try:  # имя трека в прогресс до (возможно долгого) скачивания
+                    await progress.edit_text(f"⬇️ [{i}/{total}] {short(track.title, 40)}")
+                except Exception:
+                    pass
+                in_fav = await repo.is_favorite(session, callback.from_user.id, track.id)
+                ok = await sender.send_track(
+                    msg, session, track,
+                    keyboards.track_kb(track.id, in_fav,
+                                       share_query=f"{track.artist} {track.title}".strip()),
+                    user_id=callback.from_user.id, queue_name="Плейлист",
+                    position=i, queue_size=total,
+                    status=progress, quiet=True)
+            sent, failed = (sent + 1, failed) if ok else (sent, failed + 1)
+            if i < total:
+                await asyncio.sleep(1.0)  # защита от rate limit Telegram
 
     stopped = batch["cancel"]
     _batches.pop(callback_data.key, None)
     tail = "⏹ Остановлено" if stopped else "✅ Готово"
+    verb = "упаковано и отправлено" if zip_mode else "отправлено"
+    parts_note = f" ({parts} архив(ов))" if zip_mode and parts else ""
     note = f"\n⚠️ {failed} трек(ов) не удалось получить" if failed else ""
     try:
-        await progress.edit_text(f"{tail}: отправлено {sent} из {total}.{note}",
+        await progress.edit_text(f"{tail}: {verb} {sent} из {total}{parts_note}.{note}",
                                  reply_markup=None)
     except Exception:
         pass
@@ -199,3 +224,95 @@ async def cb_dl_stop(callback: CallbackQuery, callback_data: DlStopCB):
     if batch is not None:
         batch["cancel"] = True
     await callback.answer("⏹ Остановлюсь после текущего трека")
+
+
+# ---------- zip-режим: плейлисты > ZIP_THRESHOLD треков ----------
+def _safe_name(artist: str, title: str) -> str:
+    text = " - ".join(p for p in (artist, title) if p)
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", text)
+    return short(cleaned.strip(" ."), 100) or "track"
+
+
+def _make_zip(zip_path: str, staging: list[tuple[str, str]]) -> int:
+    """mp3 уже сжаты — пакуем без дожатия (быстрее и так же по размеру)."""
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
+        for path, name in staging:
+            zf.write(path, arcname=name)
+    return os.path.getsize(zip_path)
+
+
+async def _run_zip_batch(msg: Message, progress: Message, batch: dict,
+                         ids: list[int], quality: int, protect: bool) -> tuple[int, int, int]:
+    """Плейлист больше 50 треков: качаем mp3 и шлём zip-частями до ~40 МБ
+    (бот не может отправить файл больше 50 МБ). Скачанное уходит в чат сразу,
+    поэтому ничего не теряется даже при остановке."""
+    total = len(ids)
+    width = len(str(total))
+    tmp = tempfile.mkdtemp(prefix="musicbot_batch_")
+    sent = failed = 0
+    parts = 0
+    staging: list[tuple[str, str]] = []  # (файл в кеше, имя внутри архива)
+    staging_size = 0
+
+    async def flush() -> None:
+        nonlocal staging, staging_size, parts
+        if not staging:
+            return
+        parts += 1
+        count = len(staging)
+        zip_path = os.path.join(tmp, f"part{parts}.zip")
+        size_mb = (await asyncio.to_thread(_make_zip, zip_path, staging)) // (1024 * 1024)
+        try:
+            await progress.edit_text(f"📦 Часть {parts} ({count} треков, ~{size_mb} МБ) — отправляю…")
+        except Exception:
+            pass
+        try:
+            await msg.answer_document(
+                FSInputFile(zip_path),
+                caption=f"📦 Часть {parts} — {count} треков",
+                protect_content=protect)
+        except Exception as e:
+            logger.exception("Не удалось отправить архив части %s: %s", parts, e)
+        for path, _ in staging:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+        staging, staging_size = [], 0
+
+    for i, track_id in enumerate(ids, 1):
+        if batch["cancel"]:
+            break
+        async with SessionFactory() as session:
+            track = await repo.get_track(session, track_id)
+            if track is None:
+                failed += 1
+                continue
+            url = await sender.ensure_download_url(session, track)
+            name = f"{i:0{width}d} — {_safe_name(track.artist, track.title)}.mp3"
+        if not url:
+            failed += 1
+            continue
+        try:
+            await progress.edit_text(f"⬇️ [{i}/{total}] {short(track.title, 40)}")
+        except Exception:
+            pass
+        try:
+            result = await downloader.download(url, quality=quality)
+        except Exception as e:
+            logger.warning("Батч: не скачался трек %s (%s): %s", track_id, track.title, e)
+            failed += 1
+            continue
+        staging.append((result.path, name))
+        staging_size += os.path.getsize(result.path)
+        sent += 1
+        if staging_size >= ZIP_PART_LIMIT:
+            await flush()
+    await flush()  # хвост; при остановке — досылает накопленное
+
+    shutil.rmtree(tmp, ignore_errors=True)
+    return sent, failed, parts

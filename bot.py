@@ -36,7 +36,8 @@ def _setup_logging() -> None:
     root_logger.addHandler(file_handler)
 
     # Уменьшаем шум от сторонних библиотек
-    for name in ("aiogram.event", "aiohttp.access", "aiohttp.client", "urllib3", "httpx"):
+    for name in ("aiogram.event", "aiohttp.access", "aiohttp.client", "urllib3", "httpx",
+                 "yandex_music"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
