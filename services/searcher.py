@@ -29,7 +29,7 @@ YANDEX_TRACK_RE = re.compile(rf"{YANDEX_HOST}/(?:album/\d+/)?track/(\d+)")
 YANDEX_UUID_RE = re.compile(rf"{YANDEX_HOST}/playlists/([A-Za-z0-9._-]+)")
 
 # максимум треков в альбоме/плейлисте, который отдаём целиком
-MAX_COLLECTION_TRACKS = 200
+MAX_COLLECTION_TRACKS = 5000
 
 _ytm: YTMusic | None = None
 _ytm_lock = threading.Lock()
