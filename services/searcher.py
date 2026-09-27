@@ -25,6 +25,8 @@ YANDEX_HOST = r"music\.yandex\.[a-z]+"
 YANDEX_PLAYLIST_RE = re.compile(rf"{YANDEX_HOST}/(?:users/([^/]+)/playlists|playlist/([^/]+))/(\d+)")
 YANDEX_ALBUM_RE = re.compile(rf"{YANDEX_HOST}/album/(\d+)")
 YANDEX_TRACK_RE = re.compile(rf"{YANDEX_HOST}/(?:album/\d+/)?track/(\d+)")
+# новый формат «поделиться»: /playlists/<uuid> (uuid может иметь префикс "lk.")
+YANDEX_UUID_RE = re.compile(rf"{YANDEX_HOST}/playlists/([A-Za-z0-9._-]+)")
 
 # максимум треков в альбоме/плейлисте, который отдаём целиком
 MAX_COLLECTION_TRACKS = 200
@@ -212,9 +214,92 @@ def _yandex_found(t) -> FoundTrack | None:
     )
 
 
+def _yandex_page_html(url: str) -> str | None:
+    """HTML страницы плейлиста. Обычные HTTP-клиенты Яндекс встречает капчей,
+    поэтому имитируем TLS-отпечаток Chrome через curl_cffi."""
+    try:
+        from curl_cffi import requests as creq
+    except ImportError:
+        logger.warning("curl_cffi не установлен — ссылки /playlists/<uuid> не поддерживаются")
+        return None
+    try:
+        resp = creq.get(url, impersonate="chrome", timeout=25)
+    except Exception as e:
+        logger.warning("Не удалось открыть страницу Яндекса %s: %s", url, e)
+        return None
+    text = resp.text or ""
+    if resp.status_code != 200 or "showcaptcha" in str(resp.url) or "showcaptcha" in text[:4000]:
+        logger.warning("Яндекс отдал капчу/ошибку для %s (status=%s)", url, resp.status_code)
+        return None
+    return text
+
+
+# пути в __STATE_PATCHES__ внутри HTML: слеши в JSON заэкранированы как \u002F
+_PATCH_META_NEEDLE = '"path":"\\u002Fplaylist\\u002Fmeta","value":'
+_PATCH_ITEM_RE = re.compile(r'"path":"\\u002Fplaylist\\u002Fitems\\u002F(\d+)","value":')
+_DECODER = json.JSONDecoder()
+
+
+def _patch_value_at(html: str, pos: int):
+    try:
+        value, _ = _DECODER.raw_decode(html, pos)
+        return value
+    except json.JSONDecodeError:
+        return None
+
+
+def _yandex_state(html: str) -> tuple[dict | None, list[dict]]:
+    """Из HTML страницы достаёт __STATE_PATCHES__: мета плейлиста и
+    упорядоченные items ({id, albumId, ...} — id треков плейлиста)."""
+    meta = None
+    i = html.find(_PATCH_META_NEEDLE)
+    if i >= 0:
+        meta = _patch_value_at(html, i + len(_PATCH_META_NEEDLE))
+    items: dict[int, dict] = {}
+    for m in _PATCH_ITEM_RE.finditer(html):
+        value = _patch_value_at(html, m.end())
+        if isinstance(value, dict) and value.get("id"):
+            items[int(m.group(1))] = value
+    return meta, [items[k] for k in sorted(items)]
+
+
+def _yandex_uuid_sync(client, url: str) -> list[FoundTrack]:
+    """Новые ссылки «поделиться» вида /playlists/<uuid>: по uuid API плейлист не
+    отдаёт, но веб-сервер вшивает id всех треков в HTML страницы — парсим его."""
+    html = _yandex_page_html(url)
+    if not html:
+        return []
+    meta, items = _yandex_state(html)
+    if not items:
+        logger.warning("В HTML %s не найдено состояние плейлиста", url)
+        return []
+    title = (meta or {}).get("title", "?")
+    total = (meta or {}).get("tracksCount") or len(items)
+    logger.info("Яндекс плейлист %r: %s/%s треков из HTML-состояния", title, len(items), total)
+
+    track_ids = [str(it["id"]) for it in items if it.get("id")]
+    out: list[FoundTrack] = []
+    for start in range(0, len(track_ids), 50):
+        chunk = track_ids[start:start + 50]
+        try:
+            tracks = client.tracks(chunk) or []
+        except Exception as e:
+            logger.warning("Не удалось получить треки Яндекса (%s шт.): %s", len(chunk), e)
+            continue
+        for t in tracks:
+            f = _yandex_found(t)
+            if f:
+                out.append(f)
+    return out[:MAX_COLLECTION_TRACKS]
+
+
 def _yandex_sync(url: str) -> list[FoundTrack]:
     from yandex_music import Client
     client = Client(config.YANDEX_TOKEN or None).init()
+
+    m = YANDEX_UUID_RE.search(url)
+    if m:
+        return _yandex_uuid_sync(client, url)
 
     m = YANDEX_TRACK_RE.search(url)
     if m:
