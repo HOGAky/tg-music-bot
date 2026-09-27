@@ -7,6 +7,7 @@ class Config(BaseSettings):
     BOT_TOKEN: str
     SPOTIFY_CLIENT_ID: str = ""
     SPOTIFY_CLIENT_SECRET: str = ""
+    YANDEX_TOKEN: str = ""  # yandex-music token: приватные плейлисты; публичные работают без него
     DB_URL: str = "sqlite+aiosqlite:///data/musicbot.db"
     CACHE_DIR: str = "downloads"
     MAX_CONCURRENT_DOWNLOADS: int = 4

@@ -10,8 +10,11 @@ Telegram-бот для поиска, скачивания и прослушив�
 
 ### 🔍 Поиск и загрузка
 - Текстовый поиск по названию/артисту
-- Ссылки на YouTube / YouTube Music / SoundCloud / Spotify
-- Источники: YT Music (основной), SoundCloud (fallback), yt-dlp (скачивание)
+- Ссылки на YouTube / YouTube Music / SoundCloud / Spotify / Яндекс Музыку
+- Плейлисты и альбомы целиком: Spotify (нужны API-ключи) и Яндекс Музыка —
+  кнопка «⬇️ Скачать все» с прогрессом и остановкой, до 200 треков
+- Источники: YT Music (основной), SoundCloud (fallback), yt-dlp (скачивание);
+  треки Spotify/Яндекса качаются через поиск на YT Music
 - Кэш file_id — повторные запросы не качают заново
 - LRU-очистка локального кэша mp3 (лимит 1.5 ГБ)
 
@@ -56,7 +59,7 @@ tg-music-bot/
 │   └── session.py          # engine + SessionFactory + init_db()
 │
 ├── services/
-│   ├── searcher.py         # YT Music + SoundCloud + resolve_url (yt-dlp + spotipy)
+│   ├── searcher.py         # YT Music + SoundCloud + resolve_url (yt-dlp + spotipy + yandex-music)
 │   ├── downloader.py       # yt-dlp + semaphore + LRU кэш
 │   ├── sender.py           # send_track (качество, protect_content, статистика)
 │   ├── player.py           # now playing по пользователям
@@ -153,6 +156,7 @@ API принимает только запросы с корректной по�
 | BOT_TOKEN | str | — | Токен от @BotFather (обязательно) |
 | SPOTIFY_CLIENT_ID | str | "" | Spotify API (иначе fallback через oembed) |
 | SPOTIFY_CLIENT_SECRET | str | "" | Spotify API |
+| YANDEX_TOKEN | str | "" | Токен Яндекс Музыки: приватные плейлисты («Мне нравится» и т.п.); публичные работают без него |
 | API_ENABLED | bool | false | Запускать Mini App |
 | API_HOST | str | 0.0.0.0 | Хост веб-плеера |
 | API_PORT | int | 8080 | Порт веб-плеера |
@@ -187,6 +191,9 @@ pytest
 
 ## 🩺 Известные ограничения
 
+- Spotify-плейлисты/альбомы без API-ключей работают через публичную embed-страницу — только первые ~50 треков; с ключами (`SPOTIFY_CLIENT_ID/SECRET`) — список целиком.
+- Треки Яндекс Музыки качаются не напрямую, а через повторный поиск на YT Music — редкие треки могут не найтись.
+- Пакетное скачивание живёт в памяти процесса: после рестарта бота кнопка «⬇️ Скачать все» на старых сообщениях перестаёт работать.
 - SQLite single-instance — потолок параллелизма; для масштаба нужен PostgreSQL.
 - yt-dlp ломается раз в 2 недели — нужны регулярные обновления зависимостей.
 - Смена качества в /settings влияет только на новые загрузки: уже закэшированный file_id отдаётся как есть.

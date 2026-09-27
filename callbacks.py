@@ -65,3 +65,11 @@ class SetQualityCB(CallbackData, prefix="sq"):
 
 class SetProtectCB(CallbackData, prefix="sp"):
     pass
+
+
+class DlAllCB(CallbackData, prefix="dla"):
+    key: str
+
+
+class DlStopCB(CallbackData, prefix="dls"):
+    key: str

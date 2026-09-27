@@ -1,22 +1,40 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from callbacks import (FavCB, FavDelCB, LyricsCB, PlayAllCB, PlayCB, PlAddQCB, PlAddTrackCB,
-                       PlDelCB, PlDelTrackCB, PlMenuCB, PlNewCB, PlSelCB, PlViewCB,
-                       RadioCB, SetProtectCB, SetQualityCB)
+from callbacks import (DlAllCB, DlStopCB, FavCB, FavDelCB, LyricsCB, PlayAllCB, PlayCB,
+                       PlAddQCB, PlAddTrackCB, PlDelCB, PlDelTrackCB, PlMenuCB, PlNewCB,
+                       PlSelCB, PlViewCB, RadioCB, SetProtectCB, SetQualityCB)
 from database.models import Playlist, Track, User
 from database.repo import QUALITIES
 from utils import short
+
+COLLECTION_SHOWN = 30  # сколько треков коллекции показывать кнопками (всё качается целиком)
 
 
 def _label(t: Track) -> str:
     return short(f"{t.artist} — {t.title}" if t.artist else t.title, 48)
 
 
+def _result_rows(tracks: list[Track]) -> list[list[InlineKeyboardButton]]:
+    return [[InlineKeyboardButton(text=_label(t), callback_data=PlayCB(track_id=t.id).pack())]
+            for t in tracks]
+
+
 def results_kb(tracks: list[Track]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=_label(t), callback_data=PlayCB(track_id=t.id).pack())]
-        for t in tracks
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=_result_rows(tracks))
+
+
+def collection_kb(tracks: list[Track], batch_key: str) -> InlineKeyboardMarkup:
+    """Альбом/плейлист по ссылке: скачать всё + выбор отдельных треков."""
+    rows = [[InlineKeyboardButton(text=f"⬇️ Скачать все ({len(tracks)})",
+                                  callback_data=DlAllCB(key=batch_key).pack())]]
+    rows += _result_rows(tracks[:COLLECTION_SHOWN])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def stop_kb(batch_key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⏹ Остановить", callback_data=DlStopCB(key=batch_key).pack())
+    ]])
 
 
 def track_kb(track_id: int, in_fav: bool, share_query: str = "") -> InlineKeyboardMarkup:

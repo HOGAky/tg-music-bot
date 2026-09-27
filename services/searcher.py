@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import re
@@ -18,6 +19,15 @@ logger = logging.getLogger(__name__)
 URL_RE = re.compile(r"https?://\S+")
 # ДВЕ захватывающие группы: тип (track/album/playlist) и id
 SPOTIFY_RE = re.compile(r"(track|album|playlist)/([A-Za-z0-9]{22})")
+# Яндекс Музыка: .../users/<login>/playlists/<kind>, .../playlist/<login>/<kind>,
+# .../album/<id> и .../track/<id> (в т.ч. album/<id>/track/<id>)
+YANDEX_HOST = r"music\.yandex\.[a-z]+"
+YANDEX_PLAYLIST_RE = re.compile(rf"{YANDEX_HOST}/(?:users/([^/]+)/playlists|playlist/([^/]+))/(\d+)")
+YANDEX_ALBUM_RE = re.compile(rf"{YANDEX_HOST}/album/(\d+)")
+YANDEX_TRACK_RE = re.compile(rf"{YANDEX_HOST}/(?:album/\d+/)?track/(\d+)")
+
+# максимум треков в альбоме/плейлисте, который отдаём целиком
+MAX_COLLECTION_TRACKS = 200
 
 _ytm: YTMusic | None = None
 _ytm_lock = threading.Lock()
@@ -155,27 +165,113 @@ def _sp_collection_sync(kind: str, sid: str) -> list[FoundTrack]:
     from spotipy.oauth2 import SpotifyClientCredentials
     sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
         config.SPOTIFY_CLIENT_ID, config.SPOTIFY_CLIENT_SECRET), requests_timeout=15)
-    out = []
+    out: list[FoundTrack] = []
+
+    def _track(t: dict) -> None:
+        if not t or not t.get("id") or t.get("type", "track") != "track":
+            return  # удалённые/локальные треки и подкасты пропускаем
+        out.append(FoundTrack(
+            title=t["name"],
+            artist=", ".join(a["name"] for a in t["artists"]),
+            source_url=t["external_urls"]["spotify"],
+            duration=int(t["duration_ms"] / 1000),
+        ))
+
     if kind == "album":
-        for t in sp.album(sid)["tracks"]["items"][:30]:
-            out.append(FoundTrack(
-                title=t["name"],
-                artist=", ".join(a["name"] for a in t["artists"]),
-                source_url=t["external_urls"]["spotify"],
-                duration=int(t["duration_ms"] / 1000),
-            ))
+        resp = sp.album(sid)["tracks"]
+        while True:
+            for t in resp["items"]:
+                _track(t)
+            if not resp.get("next") or len(out) >= MAX_COLLECTION_TRACKS:
+                break
+            resp = sp.next(resp)
     elif kind == "playlist":
-        for item in sp.playlist(sid)["tracks"]["items"][:50]:
-            t = item.get("track")
-            if not t or not t.get("id"):
+        resp = sp.playlist_items(sid, limit=100, additional_types=("track",))
+        while True:
+            for item in resp["items"]:
+                _track(item.get("track") or {})
+            if not resp.get("next") or len(out) >= MAX_COLLECTION_TRACKS:
+                break
+            resp = sp.next(resp)
+    return out[:MAX_COLLECTION_TRACKS]
+
+
+# ---------- Яндекс Музыка ----------
+def _yandex_found(t) -> FoundTrack | None:
+    """Track из yandex-music -> FoundTrack. Прямой ссылки нет — источник ищется
+    лениво на YT Music (как у Spotify) через ensure_download_url."""
+    if t is None or not getattr(t, "available", True) or not getattr(t, "id", None):
+        return None
+    artist = ", ".join(a.name for a in (t.artists or []) if getattr(a, "name", None))
+    dur = getattr(t, "duration_ms", None)
+    return FoundTrack(
+        title=t.title or "Unknown",
+        artist=artist,
+        source_url=f"https://music.yandex.ru/track/{t.id}",
+        duration=int(dur // 1000) if dur else None,
+    )
+
+
+def _yandex_sync(url: str) -> list[FoundTrack]:
+    from yandex_music import Client
+    client = Client(config.YANDEX_TOKEN or None).init()
+
+    m = YANDEX_TRACK_RE.search(url)
+    if m:
+        tracks = client.tracks(m.group(1)) or []
+        if isinstance(tracks, list) and tracks:
+            f = _yandex_found(tracks[0])
+            return [f] if f else []
+        return []
+
+    m = YANDEX_PLAYLIST_RE.search(url)
+    if m:
+        owner = m.group(1) or m.group(2)
+        pl = client.users_playlists(kind=m.group(3), user_id=owner)
+        if isinstance(pl, list):
+            pl = pl[0] if pl else None
+        shorts = list(getattr(pl, "tracks", None) or [])
+        # yandex-music 2.x: PlaylistTrack.track; 3.x: TrackShort.track — может быть не заполнен
+        slots: list[FoundTrack | None] = []
+        missing_ids: list[str] = []
+        for pt in shorts:
+            t = getattr(pt, "track", None)
+            f = _yandex_found(t) if t is not None else None
+            slots.append(f)
+            if f is None and getattr(pt, "id", None):
+                missing_ids.append(pt.id)
+        fetched: dict[str, object] = {}
+        if missing_ids:  # дозапрашиваем полные треки одной пачкой
+            try:
+                for t in client.tracks(missing_ids) or []:
+                    if t is not None and t.id:
+                        fetched[str(t.id)] = t
+            except Exception as e:
+                logger.warning("Не удалось дозапросить %s треков Яндекса: %s", len(missing_ids), e)
+        missing_iter = iter(missing_ids)  # None-слоты и их id записаны в одном порядке
+        out: list[FoundTrack] = []
+        for slot in slots:
+            if slot is not None:
+                out.append(slot)
                 continue
-            out.append(FoundTrack(
-                title=t["name"],
-                artist=", ".join(a["name"] for a in t["artists"]),
-                source_url=t["external_urls"]["spotify"],
-                duration=int(t["duration_ms"] / 1000),
-            ))
-    return out
+            tid = next(missing_iter, None)
+            f = _yandex_found(fetched.get(str(tid))) if tid else None
+            if f is not None:
+                out.append(f)
+        return out[:MAX_COLLECTION_TRACKS]
+
+    m = YANDEX_ALBUM_RE.search(url)
+    if m:
+        album = client.albums_with_tracks(m.group(1))
+        out = []
+        for vol in getattr(album, "volumes", None) or []:
+            for t in vol or []:
+                f = _yandex_found(t)
+                if f:
+                    out.append(f)
+        return out[:MAX_COLLECTION_TRACKS]
+
+    return []
 
 
 async def _fetch_oembed(url: str, ssl_ctx) -> dict:
@@ -222,6 +318,81 @@ async def _spotify_via_oembed(url: str) -> list[FoundTrack]:
     return [FoundTrack(title=title, artist=artist, source_url=url)]
 
 
+async def _spotify_via_embed(kind: str, sid: str) -> list[FoundTrack]:
+    """Плейлисты/альбомы Spotify без API-ключей: трек-лист из публичной embed-страницы
+    (JSON в __NEXT_DATA__). Отдаёт примерно первые 50 треков; полный список — через API."""
+    try:
+        ctx: object = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = None  # дефолтный контекст
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+    embed_url = f"https://open.spotify.com/embed/{kind}/{sid}"
+
+    async def fetch(ssl_ctx) -> str:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as http:
+            async with http.get(embed_url, ssl=ssl_ctx) as r:
+                r.raise_for_status()
+                return await r.text(errors="replace")
+
+    try:
+        html = await fetch(ctx)
+    except aiohttp.ClientConnectorCertificateError:
+        logger.warning("Spotify embed: сертификат не прошёл проверку. Повтор без проверки SSL.")
+        try:
+            html = await fetch(False)
+        except aiohttp.ClientError as e:
+            logger.warning("Spotify embed недоступен (без SSL тоже): %s", e)
+            return []
+    except aiohttp.ClientError as e:
+        logger.warning("Spotify embed недоступен: %s", e)
+        return []
+
+    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
+    if not m:
+        logger.warning("Spotify embed: не найден __NEXT_DATA__ для %s/%s", kind, sid)
+        return []
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError as e:
+        logger.warning("Spotify embed: битый JSON для %s/%s: %s", kind, sid, e)
+        return []
+
+    def find_track_list(node: object) -> list | None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "trackList" and isinstance(v, list) and v:
+                    return v
+                found = find_track_list(v)
+                if found:
+                    return found
+        elif isinstance(node, list):
+            for v in node:
+                found = find_track_list(v)
+                if found:
+                    return found
+        return None
+
+    out: list[FoundTrack] = []
+    for item in find_track_list(data) or []:
+        if not isinstance(item, dict):
+            continue
+        uri = item.get("uri") or ""
+        if not uri.startswith("spotify:track:"):
+            continue
+        duration = item.get("duration")
+        out.append(FoundTrack(
+            title=item.get("title") or "Unknown",
+            artist=item.get("subtitle") or "",
+            source_url=f"https://open.spotify.com/track/{uri.rsplit(':', 1)[-1]}",
+            duration=int(duration / 1000) if isinstance(duration, (int, float)) and duration else None,
+        ))
+    if not out:
+        logger.warning("Spotify embed: пустой trackList для %s/%s", kind, sid)
+    return out[:MAX_COLLECTION_TRACKS]
+
+
 async def resolve_url(url: str) -> list[FoundTrack]:
     """Разбор ссылки -> список треков (1 для трека, много для альбома/плейлиста)."""
     if "spotify.com" in url:
@@ -236,11 +407,20 @@ async def resolve_url(url: str) -> list[FoundTrack]:
                     return [await asyncio.to_thread(_sp_track_sync, sid)]
                 return await asyncio.to_thread(_sp_collection_sync, kind, sid)
             except Exception as e:
-                logger.warning("Spotify API ошибка (%s/%s): %s. Переходим в oembed fallback.",
+                logger.warning("Spotify API ошибка (%s/%s): %s. Переходим в fallback (oembed/embed).",
                                kind, sid, e)
         if kind == "track":
             return await _spotify_via_oembed(url)
-        logger.warning("Spotify %s без API ключа не поддерживается (нужен client_id)", kind)
+        found = await _spotify_via_embed(kind, sid)
+        if found:
+            return found
+        logger.warning("Spotify %s: трек-лист не получен ни через API, ни через embed", kind)
         return []
+    if "music.yandex" in url:
+        try:
+            return await asyncio.to_thread(_yandex_sync, url)
+        except Exception as e:
+            logger.exception("Яндекс Музыка не смогла обработать %s: %s", url, e)
+            return []
     # YouTube / YouTube Music / SoundCloud / Bandcamp / ... — всё, что умеет yt-dlp
     return [await asyncio.to_thread(_probe_sync, url)]
