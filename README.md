@@ -40,41 +40,41 @@ Telegram-бот для поиска, скачивания и прослушив�
 ## 🏗 Архитектура
 
 tg-music-bot/
-├── bot.py                  # Entrypoint: Bot+Dispatcher, запуск Mini App
-├── config.py               # pydantic-settings Config
-├── texts.py                # RU-шаблоны сообщений
-├── utils.py                # helpers: short(), pack_query, msg_of, safe_edit
-├── callbacks.py            # aiogram CallbackData classes
-├── keyboards.py            # inline-клавиатуры
-├── requirements.txt
-├── .env.example
-│
-├── database/
-│   ├── models.py           # SQLAlchemy 2 Mapped: User, Track, Favorite, Playlist,
-│   │                       #   PlaylistTrack, TrackPlay
-│   ├── repo.py             # async CRUD
-│   └── session.py          # engine + SessionFactory + init_db()
-│
-├── services/
-│   ├── searcher.py         # YT Music + SoundCloud + resolve_url (yt-dlp + spotipy)
-│   ├── downloader.py       # yt-dlp + semaphore + LRU кэш
-│   ├── sender.py           # send_track (качество, protect_content, статистика)
-│   ├── player.py           # now playing по пользователям
-│   ├── lyrics.py           # LRCLIB
-│   └── radio.py            # похожие треки из YT Music
-│
-├── handlers/
-│   ├── common.py           # /start, /help
-│   ├── search.py           # поиск + пагинация
-│   ├── player.py           # /now, /top, /settings
-│   ├── playlists.py        # /playlists, /new
-│   ├── favorites.py        # /fav, ❤️
-│   ├── inline.py           # inline-режим
-│   └── track_tools.py      # 📝 тексты, 📻 радио
-│
-└── webapp/
-    ├── app.py              # aiohttp: /app, /api/library, /api/stream/{id}, /healthz
-    └── static/index.html   # веб-плеер
+    ├── bot.py                  # Entrypoint: Bot+Dispatcher, запуск Mini App
+    ├── config.py               # pydantic-settings Config
+    ├── texts.py                # RU-шаблоны сообщений
+    ├── utils.py                # helpers: short(), pack_query, msg_of, safe_edit
+    ├── callbacks.py            # aiogram CallbackData classes
+    ├── keyboards.py            # inline-клавиатуры
+    ├── requirements.txt
+    ├── .env.example
+    │
+    ├── database/
+    │   ├── models.py           # SQLAlchemy 2 Mapped: User, Track, Favorite, Playlist,
+    │   │                       #   PlaylistTrack, TrackPlay
+    │   ├── repo.py             # async CRUD
+    │   └── session.py          # engine + SessionFactory + init_db()
+    │
+    ├── services/
+    │   ├── searcher.py         # YT Music + SoundCloud + resolve_url (yt-dlp + spotipy)
+    │   ├── downloader.py       # yt-dlp + semaphore + LRU кэш
+    │   ├── sender.py           # send_track (качество, protect_content, статистика)
+    │   ├── player.py           # now playing по пользователям
+    │   ├── lyrics.py           # LRCLIB
+    │   └── radio.py            # похожие треки из YT Music
+    │
+    ├── handlers/
+    │   ├── common.py           # /start, /help
+    │   ├── search.py           # поиск + пагинация
+    │   ├── player.py           # /now, /top, /settings
+    │   ├── playlists.py        # /playlists, /new
+    │   ├── favorites.py        # /fav, ❤️
+    │   ├── inline.py           # inline-режим
+    │   └── track_tools.py      # 📝 тексты, 📻 радио
+    │
+    └── webapp/
+        ├── app.py              # aiohttp: /app, /api/library, /api/stream/{id}, /healthz
+        └── static/index.html   # веб-плеер
 
 Async-стек: aiogram 3 · SQLAlchemy 2 async + aiosqlite · aiohttp · yt-dlp
 
