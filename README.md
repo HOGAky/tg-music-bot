@@ -165,9 +165,15 @@ API принимает только запросы с корректной по�
 | API_HOST | str | 0.0.0.0 | Хост веб-плеера |
 | API_PORT | int | 8080 | Порт веб-плеера |
 | WEBAPP_URL | str | "" | Публичный HTTPS-адрес плеера (<host>/app/) |
-| DB_URL | str | sqlite+aiosqlite:///data/musicbot.db | SQLAlchemy-строка подключения |
+| DB_URL | str | sqlite+aiosqlite:///data/musicbot.db | SQLAlchemy-строка подключения (PostgreSQL: `postgresql+asyncpg://…`) |
 | CACHE_DIR | str | downloads | Кэш mp3 |
 | MAX_CONCURRENT_DOWNLOADS | int | 4 | Лимит параллельных yt-dlp |
+| WEBHOOK_ENABLED | bool | false | Webhook вместо polling (продакшен за nginx) |
+| WEBHOOK_URL / WEBHOOK_PATH / WEBHOOK_SECRET | str | "" | Адрес, путь и секрет webhook |
+| LOG_LEVEL / LOG_FORMAT | str | INFO / text | Уровень и формат логов (json для облака) |
+| USE_S3_STORAGE | bool | false | Кэш mp3 в Yandex Object Storage; при недоступности S3 — локальный кэш |
+| S3_ENDPOINT_URL / S3_BUCKET_NAME / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY / S3_REGION / S3_CACHE_PREFIX | str | — | Настройки S3 (см. `.env.example`) |
+| USE_REDIS / REDIS_URL | bool/str | false / "" | Redis для FSM (мультиинстансность); fallback — память |
 
 ---
 

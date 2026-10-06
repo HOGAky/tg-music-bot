@@ -389,7 +389,12 @@ async def _run_full_zip_batch(msg: Message, progress: Message, batch: dict, key:
                 return
         name = f"{index:0{width}d} — {_safe_name(t.artist, t.title)}.mp3"
         async with zip_lock:
-            await asyncio.to_thread(zf.write, dl.path, name)
+            try:
+                await asyncio.to_thread(zf.write, dl.path, name)
+            except Exception as e:  # дубликат/исчезнувший файл — не роняем весь батч
+                logger.warning("Батч zip: не упаковать %s: %s", name, e)
+                failed += 1
+                return
             try:
                 os.remove(dl.path)
             except OSError:

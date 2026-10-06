@@ -26,6 +26,7 @@ class Track(Base):
     artist: Mapped[str] = mapped_column(String(256), default="")
     duration: Mapped[int | None] = mapped_column(Integer)
     file_id: Mapped[str | None] = mapped_column(String(256))            # кеш telegram file_id
+    s3_key: Mapped[str | None] = mapped_column(String(256))             # ключ mp3 в Object Storage
 
 
 class Playlist(Base):

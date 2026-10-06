@@ -28,5 +28,18 @@ class Config(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "text"  # text or json
 
+    # ---- S3 (Yandex Object Storage) ----
+    USE_S3_STORAGE: bool = False             # кэшировать mp3 в S3
+    S3_ENDPOINT_URL: str = ""                # e.g., https://storage.yandexcloud.net
+    S3_BUCKET_NAME: str = ""
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
+    S3_REGION: str = "ru-central1"
+    S3_CACHE_PREFIX: str = "musicbot/"
+
+    # ---- Redis (FSM + кэш, мультиинстансность) ----
+    REDIS_URL: str = ""                      # e.g., redis://localhost:6379/0
+    USE_REDIS: bool = False
+
 
 config = Config()

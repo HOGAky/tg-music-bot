@@ -6,6 +6,7 @@ from aiogram.types import FSInputFile, Message
 from database import repo
 from database.models import Track
 from services import downloader, player, searcher
+from services.storage import storage
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,11 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
             except Exception:
                 pass
         return False
+
+    s3_key = storage.key_for(url, quality)  # трек выложен/взят из S3-кэша — запомним ключ
+    if storage.enabled and track.s3_key != s3_key:
+        track.s3_key = s3_key
+        await session.commit()
 
     if os.path.getsize(result.path) > 49 * 1024 * 1024:  # лимит Telegram для ботов — 50 МБ
         _cleanup(result.path, result.thumbnail)

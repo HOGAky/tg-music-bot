@@ -36,6 +36,24 @@ services:
       timeout: 5s
       retries: 3
 
+  redis:
+    image: redis:alpine
+    container_name: musicbot-redis
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 networks:
   internal:
     driver: bridge
+
+volumes:
+  redis_data:

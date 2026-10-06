@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
 from config import config
 from database.session import init_db
@@ -51,6 +51,23 @@ def _setup_logging() -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
+async def _make_dispatcher() -> Dispatcher:
+    """RedisStorage для мультиинстансности; при недоступности Redis — MemoryStorage."""
+    if not (config.USE_REDIS and config.REDIS_URL):
+        return Dispatcher()
+    try:
+        import redis.asyncio as aioredis
+        from aiogram.fsm.storage.redis import RedisStorage
+
+        client = aioredis.from_url(config.REDIS_URL, socket_connect_timeout=3)
+        await client.ping()  # проверяем связь до выбора хранилища
+        logging.info("FSM storage: Redis (%s)", config.REDIS_URL)
+        return Dispatcher(storage=RedisStorage(client))
+    except Exception as e:
+        logging.warning("Redis недоступен (%s) — используется MemoryStorage", e)
+        return Dispatcher()
+
+
 async def main() -> None:
     _setup_logging()
     logging.info("=== musicbot запускается ===")
@@ -61,7 +78,7 @@ async def main() -> None:
 
     bot = Bot(token=config.BOT_TOKEN,
               default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
+    dp = await _make_dispatcher()
     # ВАЖНО: playlists/favorites ДО search — FSM-состояния должны ловить текст раньше поиска
     dp.include_routers(common.router, favorites.router, player.router, playlists.router,
                        track_tools.router, inline.router, search.router)

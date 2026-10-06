@@ -1,10 +1,14 @@
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 
 import yt_dlp
 
 from config import config
+from services.storage import storage
+
+logger = logging.getLogger(__name__)
 
 CACHE_LIMIT_BYTES = 1_500_000_000
 
@@ -19,6 +23,20 @@ class DownloadResult:
     title: str
     duration: int | None
     thumbnail: str | None
+
+
+async def _cached_copy(key: str) -> DownloadResult | None:
+    """mp3 из кэша: сначала локальный файл, затем S3. None — кэша нет."""
+    local_path = os.path.join(config.CACHE_DIR, key)
+    if os.path.exists(local_path):
+        return DownloadResult(path=local_path, title="", duration=None, thumbnail=None)
+    if not await asyncio.to_thread(storage.file_exists, key):
+        return None
+    got = await asyncio.to_thread(storage.download_file, key, local_path)
+    if got is None:
+        return None
+    logger.info("Трек из S3-кэша: %s", key)
+    return DownloadResult(path=local_path, title="", duration=None, thumbnail=None)
 
 
 def _download_sync(url: str, out_dir: str, quality: int) -> DownloadResult:
@@ -88,9 +106,25 @@ def prune_cache(limit: int = CACHE_LIMIT_BYTES) -> None:
 
 
 async def download(url: str, quality: int = 192) -> DownloadResult:
+    # 1) кэш: локальный файл или S3
+    cached = await _cached_copy(storage.key_for(url, quality))
+    if cached is not None:
+        return cached
+
     # защита от параллельного скачивания одного и того же URL
     async with _locks_guard:
         lock = _locks.setdefault(f"{url}#{quality}", asyncio.Lock())
     async with lock:
+        # 2) повторная проверка S3: параллельный запрос мог уже выложить трек
+        cached = await _cached_copy(storage.key_for(url, quality))
+        if cached is not None:
+            return cached
+
+        # 3) yt-dlp
         async with _semaphore:
-            return await asyncio.to_thread(_download_sync, url, config.CACHE_DIR, quality)
+            result = await asyncio.to_thread(_download_sync, url, config.CACHE_DIR, quality)
+
+        # 4) выкладываем в S3 — дальше локальный файл одноразовый (удаляется после отправки)
+        await asyncio.to_thread(storage.upload_file, result.path,
+                                storage.key_for(url, quality))
+        return result
