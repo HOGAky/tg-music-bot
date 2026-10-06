@@ -4,6 +4,11 @@ services:
     container_name: musicbot
     restart: always
     env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -16,6 +21,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: musicbot-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: musicbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      POSTGRES_DB: musicbot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U musicbot -d musicbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   nginx:
     build: ./nginx
@@ -56,4 +79,5 @@ networks:
     driver: bridge
 
 volumes:
+  postgres_data:
   redis_data:
