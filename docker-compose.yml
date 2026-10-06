@@ -4,6 +4,9 @@ services:
     container_name: musicbot
     restart: always
     env_file: .env
+    extra_hosts:
+      # Telegram-фильтрация режет часть DC-адресов из облака: пинним стабильный
+      - "api.telegram.org:149.154.167.220"
     depends_on:
       postgres:
         condition: service_healthy
