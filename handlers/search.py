@@ -10,14 +10,17 @@ import zipfile
 
 from aiogram import Router, F
 from aiogram.filters import StateFilter
-from aiogram.types import CallbackQuery, FSInputFile, Message
+from aiogram.types import CallbackQuery, FSInputFile, LinkPreviewOptions, Message
 
 import keyboards
 from callbacks import DlAllCB, DlStopCB, FavCB, PlayCB
+from config import config
 from database import repo
+from database.models import Track
 from database.session import SessionFactory
 from services import downloader, searcher, sender
 from utils import msg_of, short
+from webapp.app import batch_zip_url, register_batch_zip, tunnel_alive
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +31,8 @@ router = Router(name="search")
 _batches: dict[str, dict] = {}
 BATCH_TTL = 6 * 3600.0
 
-ZIP_THRESHOLD = 50        # больше треков — отдаём zip-архивами вместо сообщений
-ZIP_PART_LIMIT = 40 * 1024 * 1024  # запас до лимита Telegram в 50 МБ на файл
+ZIP_THRESHOLD = 50        # больше треков — отдаём zip-архивом вместо сообщений
+ZIP_PART_LIMIT = 40 * 1024 * 1024  # запас до лимита Telegram в 50 МБ на файл (fallback-режим)
 
 
 def _register_batch(user_id: int, track_ids: list[int]) -> str:
@@ -92,8 +95,8 @@ async def on_text(message: Message):
             # ссылка на альбом/плейлист: предлагаем скачать всё целиком
             key = _register_batch(message.from_user.id, [t.id for t in tracks])
             shown = min(len(tracks), keyboards.COLLECTION_SHOWN)
-            zip_note = ("\n\n📦 Треков больше 50 — «Скачать все» пришлёт их zip-архивами "
-                        "по ~40 МБ, чтобы ничего не потерялось.") if len(tracks) > ZIP_THRESHOLD else ""
+            zip_note = ("\n\n📦 Треков больше 50 — «Скачать все» соберёт их "
+                        "в один zip-архив.") if len(tracks) > ZIP_THRESHOLD else ""
             await message.answer(
                 f"🎧 Плейлист из <b>{len(tracks)}</b> треков — можно скачать всё разом "
                 f"или слушать по одному (первые {shown}):{zip_note}",
@@ -171,15 +174,19 @@ async def cb_download_all(callback: CallbackQuery, callback_data: DlAllCB):
     quality = user.quality if user is not None else 192
     protect = bool(user.protect_content) if user is not None else False
 
+    zip_mode = total > ZIP_THRESHOLD
+    single = zip_mode and await tunnel_alive()
     progress = await msg.answer(
-        f"⬇️ Скачиваю {total} треков" + (" в zip-архивы…" if total > ZIP_THRESHOLD else "…"),
+        f"⬇️ Скачиваю {total} треков" + (" в zip-архив…" if single else "…" if zip_mode else ""),
         reply_markup=keyboards.stop_kb(callback_data.key))
 
-    zip_mode = total > ZIP_THRESHOLD
     parts = 0
     sent = failed = 0
-    if zip_mode:
-        sent, failed, parts = await _run_zip_batch(msg, progress, batch, ids, quality, protect)
+    if single:
+        sent, failed = await _run_full_zip_batch(
+            msg, progress, batch, callback_data.key, ids, quality, protect)
+    elif zip_mode:
+        sent, failed, parts = await _run_parts_batch(msg, progress, batch, ids, quality, protect)
     else:
         for i, track_id in enumerate(ids, 1):
             if batch["cancel"]:
@@ -208,11 +215,15 @@ async def cb_download_all(callback: CallbackQuery, callback_data: DlAllCB):
     stopped = batch["cancel"]
     _batches.pop(callback_data.key, None)
     tail = "⏹ Остановлено" if stopped else "✅ Готово"
-    verb = "упаковано и отправлено" if zip_mode else "отправлено"
-    parts_note = f" ({parts} архив(ов))" if zip_mode and parts else ""
+    if single:
+        result = f"в архиве {sent} из {total} треков"
+    elif zip_mode:
+        result = f"упаковано и отправлено {sent} из {total} ({parts} архив(ов))"
+    else:
+        result = f"отправлено {sent} из {total}"
     note = f"\n⚠️ {failed} трек(ов) не удалось получить" if failed else ""
     try:
-        await progress.edit_text(f"{tail}: {verb} {sent} из {total}{parts_note}.{note}",
+        await progress.edit_text(f"{tail}: {result}.{note}",
                                  reply_markup=None)
     except Exception:
         pass
@@ -241,11 +252,10 @@ def _make_zip(zip_path: str, staging: list[tuple[str, str]]) -> int:
     return os.path.getsize(zip_path)
 
 
-async def _run_zip_batch(msg: Message, progress: Message, batch: dict,
-                         ids: list[int], quality: int, protect: bool) -> tuple[int, int, int]:
-    """Плейлист больше 50 треков: качаем mp3 и шлём zip-частями до ~40 МБ
-    (бот не может отправить файл больше 50 МБ). Скачанное уходит в чат сразу,
-    поэтому ничего не теряется даже при остановке."""
+async def _run_parts_batch(msg: Message, progress: Message, batch: dict,
+                           ids: list[int], quality: int, protect: bool) -> tuple[int, int, int]:
+    """Fallback, когда веб-сервер недоступен: zip-части до ~40 МБ, чтобы
+    скачанное не терялось даже при остановке."""
     total = len(ids)
     width = len(str(total))
     tmp = tempfile.mkdtemp(prefix="musicbot_batch_")
@@ -316,3 +326,111 @@ async def _run_zip_batch(msg: Message, progress: Message, batch: dict,
 
     shutil.rmtree(tmp, ignore_errors=True)
     return sent, failed, parts
+
+
+async def _run_full_zip_batch(msg: Message, progress: Message, batch: dict, key: str,
+                              ids: list[int], quality: int, protect: bool) -> tuple[int, int]:
+    """Один zip-архив на весь плейлист. Telegram не даёт ботам слать файлы
+    больше 50 МБ, поэтому архив, который не влезает, отдаётся ссылкой через
+    веб-сервер бота. Треки качаются параллельно и сразу дописываются в архив,
+    так что на диске не копится лишнего."""
+    total = len(ids)
+    width = len(str(total))
+    tmp = tempfile.mkdtemp(prefix="musicbot_zip_")
+    zip_path = os.path.join(tmp, "playlist.zip")
+    sent = failed = 0
+
+    # 1) треки из БД одним запросом
+    async with SessionFactory() as session:
+        found = await repo.get_tracks(session, ids)
+    items = [(i, found[tid]) for i, tid in enumerate(ids, 1) if tid in found]
+    failed += total - len(items)
+
+    # 2) недостающие ссылки ищем параллельно (поиск по YT Music), без БД
+    sem = asyncio.Semaphore(4)
+
+    async def resolve(t: Track) -> None:
+        if batch["cancel"] or t.download_url:
+            return
+        query = f"{t.artist} {t.title}".strip()
+        if not query:
+            return
+        async with sem:
+            results = await searcher.search(query, limit=1)
+        if results and results[0].download_url:
+            t.download_url = results[0].download_url
+
+    await asyncio.gather(*(resolve(t) for _, t in items))
+    async with SessionFactory() as session:  # найденные url — одним коммитом
+        for _, t in items:
+            if t.download_url:
+                db_track = await session.get(Track, t.id)
+                if db_track is not None and not db_track.download_url:
+                    db_track.download_url = t.download_url
+        await session.commit()
+
+    # 3) параллельное скачивание; готовый mp3 сразу дописываем в архив
+    zf = zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED)
+    zip_lock = asyncio.Lock()
+    sem = asyncio.Semaphore(config.MAX_CONCURRENT_DOWNLOADS)
+    done = 0
+    last_edit = 0.0
+
+    async def one(index: int, t: Track) -> None:
+        nonlocal done, failed, last_edit
+        async with sem:
+            if batch["cancel"] or not t.download_url:
+                return
+            try:
+                dl = await downloader.download(t.download_url, quality=quality)
+            except Exception as e:
+                logger.warning("Батч zip: не скачался трек %s (%s): %s", t.id, t.title, e)
+                failed += 1
+                return
+        name = f"{index:0{width}d} — {_safe_name(t.artist, t.title)}.mp3"
+        async with zip_lock:
+            await asyncio.to_thread(zf.write, dl.path, name)
+            try:
+                os.remove(dl.path)
+            except OSError:
+                pass
+        done += 1
+        now = time.monotonic()
+        if now - last_edit > 1.2:  # не спамим правками прогресса
+            last_edit = now
+            try:
+                await progress.edit_text(f"⬇️ скачано {done}/{total}")
+            except Exception:
+                pass
+
+    await asyncio.gather(*(asyncio.create_task(one(i, t)) for i, t in items))
+    await asyncio.to_thread(zf.close)
+    sent = done
+
+    # 4) доставка: файлом, если влез в лимит Telegram, иначе ссылкой
+    size = os.path.getsize(zip_path)
+    if size <= 49 * 1024 * 1024:
+        try:
+            await msg.answer_document(
+                FSInputFile(zip_path),
+                caption=f"📦 Плейлист — {sent} треков",
+                protect_content=protect)
+            shutil.rmtree(tmp, ignore_errors=True)
+        except Exception as e:
+            logger.exception("Не удалось отправить zip-архив: %s", e)
+            await msg.answer("⚠️ Архив собран, но Telegram не принял файл.")
+        return sent, failed
+
+    link = batch_zip_url(key)
+    if link:
+        register_batch_zip(key, zip_path, f"playlist_{total}tracks.zip")
+        gb = size / (1024 ** 3)
+        await msg.answer(
+            f"📦 <b>Архив готов</b>: {sent} треков, {gb:.2f} ГБ.\n"
+            f"Telegram не пропускает файлы больше 50 МБ, поэтому забирай ссылкой:\n"
+            f'<a href="{link}">⬇️ Скачать zip</a>',
+            link_preview_options=LinkPreviewOptions(is_disabled=True))
+        # файл лежит на диске до 24 часов, потом очистится сам
+    else:
+        await msg.answer("⚠️ Архив собран, но веб-сервер недоступен — ссылку дать не могу.")
+    return sent, failed

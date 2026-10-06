@@ -71,6 +71,14 @@ async def get_track(session: AsyncSession, track_id: int) -> Track | None:
     return await session.get(Track, track_id)
 
 
+async def get_tracks(session: AsyncSession, track_ids: list[int]) -> dict[int, Track]:
+    """Пачка треков одним запросом: id -> Track."""
+    if not track_ids:
+        return {}
+    stmt = select(Track).where(Track.id.in_(track_ids))
+    return {t.id: t for t in (await session.scalars(stmt)).all()}
+
+
 async def set_file_id(session: AsyncSession, track_id: int, file_id: str) -> None:
     track = await session.get(Track, track_id)
     if track is not None:
