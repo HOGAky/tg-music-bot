@@ -18,5 +18,15 @@ class Config(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8080
 
+    # ---- Webhook ----
+    WEBHOOK_ENABLED: bool = False   # использовать webhook вместо polling
+    WEBHOOK_URL: str = ""           # публичный https-адрес бота (e.g., https://bot.example.com)
+    WEBHOOK_PATH: str = "/webhook"  # путь для webhook endpoint
+    WEBHOOK_SECRET: str = ""        # секрет для валидации webhook (опционально)
+
+    # ---- Logging ----
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "text"  # text or json
+
 
 config = Config()

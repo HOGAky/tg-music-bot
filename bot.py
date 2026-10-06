@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from config import config
 from database.session import init_db
@@ -21,10 +22,19 @@ def _setup_logging() -> None:
     root_logger.setLevel(logging.DEBUG)  # собираем всё, фильтр по хендлерам
     root_logger.handlers.clear()
 
-    fmt = logging.Formatter("%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
+    if config.LOG_FORMAT == "json":
+        try:
+            from pythonjsonlogger import jsonlogger
+            fmt = jsonlogger.JsonFormatter(
+                "%(asctime)s %(levelname)s %(name)s %(message)s"
+            )
+        except ImportError:
+            fmt = logging.Formatter("%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
+    else:
+        fmt = logging.Formatter("%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
 
     console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
+    console.setLevel(getattr(logging, config.LOG_LEVEL.upper()))
     console.setFormatter(fmt)
     root_logger.addHandler(console)
 
@@ -74,13 +84,55 @@ async def main() -> None:
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(text="🎵 Плеер", web_app=WebAppInfo(url=config.WEBAPP_URL)))
 
-    await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Бот запущен и готов к приёму сообщений")
-    try:
-        await dp.start_polling(bot)
-    finally:
-        if runner is not None:
-            await runner.cleanup()
+    # Webhook или Polling режим
+    if config.WEBHOOK_ENABLED:
+        if not config.WEBHOOK_URL:
+            logging.error("WEBHOOK_ENABLED=true, но WEBHOOK_URL не задан!")
+            raise ValueError("WEBHOOK_URL обязателен при WEBHOOK_ENABLED=true")
+
+        webhook_url = f"{config.WEBHOOK_URL}{config.WEBHOOK_PATH}"
+        await bot.set_webhook(
+            url=webhook_url,
+            secret_token=config.WEBHOOK_SECRET if config.WEBHOOK_SECRET else None,
+            drop_pending_updates=True,
+        )
+        logging.info("Webhook установлен: %s", webhook_url)
+
+        # Если API не включен, поднимаем aiohttp сервер только для webhook
+        if not config.API_ENABLED:
+            from aiohttp import web
+            app = web.Application()
+            webhook_handler = SimpleRequestHandler(
+                dispatcher=dp,
+                bot=bot,
+                secret_token=config.WEBHOOK_SECRET if config.WEBHOOK_SECRET else None,
+            )
+            webhook_handler.register(app, path=config.WEBHOOK_PATH)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, host=config.API_HOST, port=config.API_PORT)
+            await site.start()
+            logging.info("Webhook HTTP-сервер запущен: %s:%s", config.API_HOST, config.API_PORT)
+
+        logging.info("Бот запущен в webhook режиме")
+        try:
+            # Просто держим процесс активным
+            while True:
+                await asyncio.sleep(3600)
+        finally:
+            await bot.delete_webhook()
+            logging.info("Webhook удалён")
+            if runner is not None:
+                await runner.cleanup()
+    else:
+        # Polling режим
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info("Бот запущен в polling режиме")
+        try:
+            await dp.start_polling(bot)
+        finally:
+            if runner is not None:
+                await runner.cleanup()
 
 
 if __name__ == "__main__":

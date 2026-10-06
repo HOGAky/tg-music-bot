@@ -1,0 +1,59 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+.venv-1/
+venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data and cache
+data/
+downloads/
+cache/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+DEPLOYMENT_TZ.md
+DEPLOY.md
+CHANGELOG.md
+AGENTS.md
+
+# Scripts
+run.bat
+scripts/
+
+# Ruff cache
+.ruff_cache/
+
+# Docker files (except root)
+nginx/ssl/
