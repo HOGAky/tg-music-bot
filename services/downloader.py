@@ -193,9 +193,20 @@ async def download(url: str, quality: int = 192) -> DownloadResult:
         if cached is not None:
             return cached
 
-        # 3) yt-dlp
-        async with _semaphore:
-            result = await asyncio.to_thread(_download_sync, url, config.CACHE_DIR, quality)
+        # 3) yt-dlp с ретраями: часть соединений из облака рвётся по SSL
+        result = None
+        for attempt in range(1, 4):
+            try:
+                async with _semaphore:
+                    result = await asyncio.to_thread(
+                        _download_sync, url, config.CACHE_DIR, quality)
+                break
+            except Exception as e:
+                # age-ограничение ретраить бессмысленно — его обходит SoundCloud-fallback
+                if "Sign in to confirm" in str(e) or attempt == 3:
+                    raise
+                logger.warning("Скачивание %s: попытка %s не удалась: %s", url, attempt, e)
+                await asyncio.sleep(1.5 * attempt)
 
         # 4) выкладываем в S3 — дальше локальный файл одноразовый (удаляется после отправки)
         await asyncio.to_thread(storage.upload_file, result.path,
