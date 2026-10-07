@@ -1,8 +1,25 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from callbacks import (DlAllCB, DlStopCB, FavCB, FavDelCB, LyricsCB, PlayAllCB, PlayCB,
-                       PlAddQCB, PlAddTrackCB, PlDelCB, PlDelTrackCB, PlMenuCB, PlNewCB,
-                       PlSelCB, PlViewCB, RadioCB, SetProtectCB, SetQualityCB)
+from callbacks import (
+    DlAllCB,
+    DlStopCB,
+    FavCB,
+    FavDelCB,
+    LyricsCB,
+    PlAddQCB,
+    PlAddTrackCB,
+    PlayAllCB,
+    PlayCB,
+    PlDelCB,
+    PlDelTrackCB,
+    PlMenuCB,
+    PlNewCB,
+    PlSelCB,
+    PlViewCB,
+    RadioCB,
+    SetProtectCB,
+    SetQualityCB,
+)
 from database.models import Playlist, Track, User
 from database.repo import QUALITIES
 from utils import short

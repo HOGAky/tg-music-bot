@@ -8,13 +8,15 @@ import time
 from urllib.parse import parse_qsl, quote
 
 import aiohttp
-from aiohttp import web
+from aiohttp import ContentTypeError, web
 
 from config import config
 from database import repo
 from database.models import Track
 from database.session import SessionFactory
-from services import downloader, lyrics as lyrics_svc, radio, searcher
+from services import downloader, radio, searcher
+from services import lyrics as lyrics_svc
+from services.storage import storage
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +78,22 @@ async def library(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
-async def _prepare_track(track: Track, quality: int) -> str:
+async def _prepare_track(session, track: Track, quality: int) -> str:
     """Файл mp3 для трека: YouTube, а при age-restricted — SoundCloud."""
     url = track.download_url or track.source_url
     try:
-        result = await downloader.download(url, quality=quality)
+        result = await downloader.download(url, quality=quality, cache_key=track.s3_key)
     except Exception as e:
         if "Sign in to confirm" not in str(e):
             raise
-        result = await downloader.download_soundcloud_fallback(track, quality)
+        result = await downloader.download_soundcloud_fallback(
+            track,
+            quality,
+            cache_key=track.s3_key,
+        )
+    if storage.enabled and result.cache_key and track.s3_key != result.cache_key:
+        track.s3_key = result.cache_key
+        await session.commit()
     return result.path
 
 
@@ -99,7 +108,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
         quality = user.quality if user is not None else 192
 
     try:
-        path = await _prepare_track(track, quality)
+        path = await _prepare_track(session, track, quality)
     except Exception:
         logger.exception("Не удалось подготовить трек %s для плеера", track_id)
         raise web.HTTPBadGateway(text="download failed")
@@ -112,7 +121,7 @@ async def _json_body(request: web.Request) -> dict:
     try:
         body = await request.json()
         return body if isinstance(body, dict) else {}
-    except Exception:
+    except (ContentTypeError, json.JSONDecodeError):
         return {}
 
 
@@ -138,7 +147,7 @@ async def search_api(request: web.Request) -> web.Response:
 
 
 async def radio_api(request: web.Request) -> web.Response:
-    user_id = _user_id(request)
+    _user_id(request)
     track_id = int(request.match_info["track_id"])
     async with SessionFactory() as session:
         track = await repo.get_track(session, track_id)
@@ -163,7 +172,7 @@ async def download_api(request: web.Request) -> web.FileResponse:
         user = await repo.get_user(session, user_id)
         quality = user.quality if user is not None else 192
     try:
-        path = await _prepare_track(track, quality)
+        path = await _prepare_track(session, track, quality)
     except Exception:
         logger.exception("Не удалось отдать файл трека %s", track_id)
         raise web.HTTPBadGateway(text="download failed")
@@ -360,10 +369,9 @@ async def tunnel_alive() -> bool:
     base = config.WEBAPP_URL.split("/app/")[0]
     try:
         timeout = aiohttp.ClientTimeout(total=5)
-        async with aiohttp.ClientSession(timeout=timeout) as http:
-            async with http.get(f"{base}/healthz") as r:
-                return r.status == 200
-    except Exception:
+        async with aiohttp.ClientSession(timeout=timeout) as http, http.get(f"{base}/healthz") as r:
+            return r.status == 200
+    except (aiohttp.ClientError, TimeoutError):
         return False
 
 

@@ -36,6 +36,7 @@ class Config(BaseSettings):
     S3_SECRET_ACCESS_KEY: str = ""
     S3_REGION: str = "ru-central1"
     S3_CACHE_PREFIX: str = "musicbot/"
+    S3_URL_TTL: int = 3600
 
     # публичный client_id веб-плеера SoundCloud (api-v2); обновляется
     # переизвлечением со страницы soundcloud.com, если однажды протухнет

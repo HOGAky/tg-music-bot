@@ -8,7 +8,7 @@ import tempfile
 import time
 import zipfile
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, FSInputFile, LinkPreviewOptions, Message
 
@@ -319,11 +319,14 @@ async def _run_parts_batch(msg: Message, progress: Message, batch: dict,
         except Exception:
             pass
         try:
-            result = await downloader.download(url, quality=quality)
+            result = await downloader.download(url, quality=quality, cache_key=track.s3_key)
         except Exception as e:
             logger.warning("Батч: не скачался трек %s (%s): %s", track_id, track.title, e)
             failed += 1
             continue
+        if config.USE_S3_STORAGE and result.cache_key and track.s3_key != result.cache_key:
+            async with SessionFactory() as session:
+                await repo.set_s3_key(session, track_id, result.cache_key)
         staging.append((result.path, name))
         staging_size += os.path.getsize(result.path)
         sent += 1
@@ -389,11 +392,18 @@ async def _run_full_zip_batch(msg: Message, progress: Message, batch: dict, key:
             if batch["cancel"] or not t.download_url:
                 return
             try:
-                dl = await downloader.download(t.download_url, quality=quality)
+                dl = await downloader.download(
+                    t.download_url,
+                    quality=quality,
+                    cache_key=t.s3_key,
+                )
             except Exception as e:
                 logger.warning("Батч zip: не скачался трек %s (%s): %s", t.id, t.title, e)
                 failed += 1
                 return
+        if config.USE_S3_STORAGE and dl.cache_key and t.s3_key != dl.cache_key:
+            async with SessionFactory() as session:
+                await repo.set_s3_key(session, t.id, dl.cache_key)
         name = f"{index:0{width}d} — {_safe_name(t.artist, t.title)}.mp3"
         async with zip_lock:
             try:

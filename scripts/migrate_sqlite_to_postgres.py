@@ -14,11 +14,17 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select, text  # noqa: E402
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import (  # noqa: E402
-    Base, Favorite, Playlist, PlaylistTrack, Track, TrackPlay, User,
+from database.models import (
+    Base,
+    Favorite,
+    Playlist,
+    PlaylistTrack,
+    Track,
+    TrackPlay,
+    User,
 )
 
 # порядок важен: сначала независимые таблицы, затем связи

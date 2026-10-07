@@ -1,9 +1,11 @@
 import hashlib
 import logging
+import os
+import time
 
 import boto3
 from botocore.client import Config as BotoConfig
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from config import config
 
@@ -11,6 +13,14 @@ logger = logging.getLogger(__name__)
 
 # быстрые таймауты: недоступный S3 не должен тормозить отправку трека
 _BOTO_CONFIG = BotoConfig(connect_timeout=5, read_timeout=30, retries={"max_attempts": 2})
+_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+_RETRYABLE_ERROR_CODES = {
+    "InternalError",
+    "RequestTimeout",
+    "RequestTimeoutException",
+    "SlowDown",
+    "Throttling",
+}
 
 
 class S3Storage:
@@ -24,7 +34,13 @@ class S3Storage:
 
     @property
     def enabled(self) -> bool:
-        return bool(config.USE_S3_STORAGE and config.S3_BUCKET_NAME)
+        return bool(
+            config.USE_S3_STORAGE
+            and config.S3_ENDPOINT_URL
+            and config.S3_BUCKET_NAME
+            and config.S3_ACCESS_KEY_ID
+            and config.S3_SECRET_ACCESS_KEY
+        )
 
     @staticmethod
     def key_for(url: str, quality: int) -> str:
@@ -45,14 +61,58 @@ class S3Storage:
         return self._client
 
     def _full_key(self, key: str) -> str:
-        return f"{config.S3_CACHE_PREFIX}{key}"
+        prefix = (config.S3_CACHE_PREFIX or "").strip("/")
+        clean_key = key.lstrip("/")
+        if not prefix:
+            return clean_key
+        return f"{prefix}/{clean_key}"
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        if isinstance(exc, EndpointConnectionError):
+            return True
+        if isinstance(exc, ClientError):
+            error = exc.response.get("Error", {})
+            if error.get("Code") in _RETRYABLE_ERROR_CODES:
+                return True
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            return status in _RETRYABLE_STATUS_CODES
+        return isinstance(exc, BotoCoreError)
+
+    def _call_with_retry(self, action: str, key: str, operation):
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                return operation()
+            except (BotoCoreError, ClientError, OSError) as exc:
+                last_error = exc
+                if attempt == 3 or not self._is_retryable(exc):
+                    break
+                delay = 0.5 * attempt
+                logger.warning(
+                    "S3 %s временно не удался (%s), попытка %s/3: %s",
+                    action,
+                    key,
+                    attempt,
+                    exc,
+                )
+                time.sleep(delay)
+        raise last_error
 
     def upload_file(self, file_path: str, key: str) -> str | None:
         """Загружает файл в S3, возвращает ключ или None при ошибке."""
         if not self.enabled:
             return None
         try:
-            self._get_client().upload_file(file_path, config.S3_BUCKET_NAME, self._full_key(key))
+            self._call_with_retry(
+                "upload",
+                key,
+                lambda: self._get_client().upload_file(
+                    file_path,
+                    config.S3_BUCKET_NAME,
+                    self._full_key(key),
+                ),
+            )
             return key
         except (BotoCoreError, ClientError, OSError) as e:
             logger.warning("S3 upload не удался (%s): %s — остаёмся на локальном кэше", key, e)
@@ -63,8 +123,16 @@ class S3Storage:
         if not self.enabled:
             return None
         try:
-            self._get_client().download_file(
-                config.S3_BUCKET_NAME, self._full_key(key), local_path)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            self._call_with_retry(
+                "download",
+                key,
+                lambda: self._get_client().download_file(
+                    config.S3_BUCKET_NAME,
+                    self._full_key(key),
+                    local_path,
+                ),
+            )
             return local_path
         except (BotoCoreError, ClientError, OSError) as e:
             logger.warning("S3 download не удался (%s): %s", key, e)
@@ -74,7 +142,14 @@ class S3Storage:
         if not self.enabled:
             return False
         try:
-            self._get_client().head_object(Bucket=config.S3_BUCKET_NAME, Key=self._full_key(key))
+            self._call_with_retry(
+                "head_object",
+                key,
+                lambda: self._get_client().head_object(
+                    Bucket=config.S3_BUCKET_NAME,
+                    Key=self._full_key(key),
+                ),
+            )
             return True
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
@@ -90,7 +165,14 @@ class S3Storage:
         if not self.enabled:
             return
         try:
-            self._get_client().delete_object(Bucket=config.S3_BUCKET_NAME, Key=self._full_key(key))
+            self._call_with_retry(
+                "delete",
+                key,
+                lambda: self._get_client().delete_object(
+                    Bucket=config.S3_BUCKET_NAME,
+                    Key=self._full_key(key),
+                ),
+            )
         except (BotoCoreError, ClientError, OSError) as e:
             logger.warning("S3 delete не удался (%s): %s", key, e)
 
@@ -102,7 +184,7 @@ class S3Storage:
             return self._get_client().generate_presigned_url(
                 "get_object",
                 Params={"Bucket": config.S3_BUCKET_NAME, "Key": self._full_key(key)},
-                ExpiresIn=ttl,
+                ExpiresIn=ttl or config.S3_URL_TTL,
             )
         except (BotoCoreError, ClientError) as e:
             logger.warning("S3 presigned url не удался (%s): %s", key, e)

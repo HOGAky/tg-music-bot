@@ -1,5 +1,9 @@
 from aiogram import Router
-from aiogram.types import InlineQuery, InlineQueryResultCachedAudio, InlineQueryResultsButton
+from aiogram.types import (
+    InlineQuery,
+    InlineQueryResultCachedAudio,
+    InlineQueryResultsButton,
+)
 
 from database import repo
 from database.session import SessionFactory

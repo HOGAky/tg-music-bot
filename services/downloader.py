@@ -28,20 +28,46 @@ class DownloadResult:
     title: str
     duration: int | None
     thumbnail: str | None
+    cache_key: str | None = None
+
+
+def _cache_path(key: str) -> str:
+    return os.path.join(config.CACHE_DIR, key.replace("/", os.sep))
 
 
 async def _cached_copy(key: str) -> DownloadResult | None:
     """mp3 из кэша: сначала локальный файл, затем S3. None — кэша нет."""
-    local_path = os.path.join(config.CACHE_DIR, key)
+    local_path = _cache_path(key)
     if os.path.exists(local_path):
-        return DownloadResult(path=local_path, title="", duration=None, thumbnail=None)
+        return DownloadResult(
+            path=local_path,
+            title="",
+            duration=None,
+            thumbnail=None,
+            cache_key=key,
+        )
     if not await asyncio.to_thread(storage.file_exists, key):
         return None
     got = await asyncio.to_thread(storage.download_file, key, local_path)
     if got is None:
         return None
     logger.info("Трек из S3-кэша: %s", key)
-    return DownloadResult(path=local_path, title="", duration=None, thumbnail=None)
+    return DownloadResult(
+        path=local_path,
+        title="",
+        duration=None,
+        thumbnail=None,
+        cache_key=key,
+    )
+
+
+async def _push_to_s3(file_path: str, key: str) -> str | None:
+    if not storage.enabled:
+        return None
+    uploaded = await asyncio.to_thread(storage.upload_file, file_path, key)
+    if uploaded:
+        logger.info("Трек загружен в S3-кэш: %s", key)
+    return uploaded
 
 
 def _download_sync(url: str, out_dir: str, quality: int) -> DownloadResult:
@@ -156,7 +182,8 @@ def _sc_download_sync(track_json: dict, client_id: str, out_dir: str) -> str:
     return path
 
 
-async def download_soundcloud_fallback(track, quality: int = 128) -> DownloadResult:
+async def download_soundcloud_fallback(track, quality: int = 128,
+                                       *, cache_key: str | None = None) -> DownloadResult:
     """Age-restricted на YouTube: ищем тот же трек на SoundCloud и качаем
     progressive-mp3 (128 kbps) напрямую через api-v2 + sndcdn."""
     client_id = config.SOUNDCLOUD_CLIENT_ID
@@ -170,17 +197,24 @@ async def download_soundcloud_fallback(track, quality: int = 128) -> DownloadRes
     os.makedirs(config.CACHE_DIR, exist_ok=True)
     path = await asyncio.to_thread(_sc_download_sync, best, client_id, config.CACHE_DIR)
     logger.info("SoundCloud fallback: %r -> %s", query, best.get("permalink_url"))
+    resolved_key = cache_key or track.s3_key or storage.key_for(
+        track.download_url or track.source_url or query,
+        quality,
+    )
+    uploaded = await _push_to_s3(path, resolved_key)
     return DownloadResult(
         path=path,
         title=best.get("title") or track.title,
         duration=(best.get("duration") or 0) // 1000 or track.duration,
         thumbnail=None,
+        cache_key=uploaded,
     )
 
 
-async def download(url: str, quality: int = 192) -> DownloadResult:
+async def download(url: str, quality: int = 192, *, cache_key: str | None = None) -> DownloadResult:
+    resolved_key = cache_key or storage.key_for(url, quality)
     # 1) кэш: локальный файл или S3
-    cached = await _cached_copy(storage.key_for(url, quality))
+    cached = await _cached_copy(resolved_key)
     if cached is not None:
         return cached
 
@@ -189,7 +223,7 @@ async def download(url: str, quality: int = 192) -> DownloadResult:
         lock = _locks.setdefault(f"{url}#{quality}", asyncio.Lock())
     async with lock:
         # 2) повторная проверка S3: параллельный запрос мог уже выложить трек
-        cached = await _cached_copy(storage.key_for(url, quality))
+        cached = await _cached_copy(resolved_key)
         if cached is not None:
             return cached
 
@@ -209,6 +243,10 @@ async def download(url: str, quality: int = 192) -> DownloadResult:
                 await asyncio.sleep(1.5 * attempt)
 
         # 4) выкладываем в S3 — дальше локальный файл одноразовый (удаляется после отправки)
-        await asyncio.to_thread(storage.upload_file, result.path,
-                                storage.key_for(url, quality))
+        result.cache_key = await _push_to_s3(result.path, resolved_key)
         return result
+
+
+async def download_track(track, quality: int = 192) -> DownloadResult:
+    url = track.download_url or track.source_url
+    return await download(url, quality=quality, cache_key=track.s3_key)

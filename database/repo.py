@@ -90,6 +90,13 @@ async def set_file_id(session: AsyncSession, track_id: int, file_id: str) -> Non
         await session.commit()
 
 
+async def set_s3_key(session: AsyncSession, track_id: int, s3_key: str) -> None:
+    track = await session.get(Track, track_id)
+    if track is not None and track.s3_key != s3_key:
+        track.s3_key = s3_key
+        await session.commit()
+
+
 # ---------- статистика прослушиваний ----------
 async def log_play(session: AsyncSession, user_id: int, track_id: int) -> None:
     session.add(TrackPlay(user_id=user_id, track_id=track_id))

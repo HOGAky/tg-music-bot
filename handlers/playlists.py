@@ -1,14 +1,23 @@
 import asyncio
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 import keyboards
-from callbacks import (PlAddQCB, PlAddTrackCB, PlDelCB, PlDelTrackCB, PlMenuCB,
-                       PlNewCB, PlSelCB, PlayAllCB, PlViewCB)
+from callbacks import (
+    PlAddQCB,
+    PlAddTrackCB,
+    PlayAllCB,
+    PlDelCB,
+    PlDelTrackCB,
+    PlMenuCB,
+    PlNewCB,
+    PlSelCB,
+    PlViewCB,
+)
 from database import repo
 from database.session import SessionFactory
 from services import searcher, sender

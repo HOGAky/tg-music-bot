@@ -51,12 +51,11 @@ async def _query_lrclib(artist: str, title: str, duration: int | None) -> dict |
         async with aiohttp.ClientSession(
             timeout=timeout,
             connector=aiohttp.TCPConnector(ssl=_ssl_context()),
-        ) as http:
-            async with http.get(API_URL, params=params) as r:
-                logger.debug("LRCLIB status %s params=%s", r.status, params)
-                if r.status != 200:
-                    return None
-                data = await r.json()
+        ) as http, http.get(API_URL, params=params) as r:
+            logger.debug("LRCLIB status %s params=%s", r.status, params)
+            if r.status != 200:
+                return None
+            data = await r.json()
     except aiohttp.ClientError as e:
         logger.warning("LRCLIB недоступен: %s params=%s", e, params)
         return None

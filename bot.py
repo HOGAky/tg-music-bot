@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import time
 from logging.handlers import RotatingFileHandler
 
 from aiogram import Bot, Dispatcher
@@ -17,6 +16,8 @@ from database.session import init_db
 from handlers import common, favorites, inline, player, playlists, search, track_tools
 from utils import bust_url
 from webapp.app import start_webapp
+
+logger = logging.getLogger(__name__)
 
 
 def _setup_logging() -> None:
@@ -65,10 +66,10 @@ async def _make_dispatcher() -> Dispatcher:
 
         client = aioredis.from_url(config.REDIS_URL, socket_connect_timeout=3)
         await client.ping()  # проверяем связь до выбора хранилища
-        logging.info("FSM storage: Redis (%s)", config.REDIS_URL)
+        logger.info("FSM storage: Redis (%s)", config.REDIS_URL)
         return Dispatcher(storage=RedisStorage(client))
-    except Exception as e:
-        logging.warning("Redis недоступен (%s) — используется MemoryStorage", e)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Redis недоступен (%s) — используется MemoryStorage", e)
         return Dispatcher()
 
 
@@ -95,7 +96,7 @@ class RetryOnNetworkError(BaseRequestMiddleware):
 
 async def main() -> None:
     _setup_logging()
-    logging.info("=== musicbot запускается ===")
+    logger.info("=== musicbot запускается ===")
 
     os.makedirs("data", exist_ok=True)
     os.makedirs(config.CACHE_DIR, exist_ok=True)
@@ -122,7 +123,7 @@ async def main() -> None:
     runner = None
     if config.API_ENABLED:
         runner = await start_webapp()
-        logging.info("WebApp HTTP-сервер включён: %s:%s", config.API_HOST, config.API_PORT)
+        logger.info("WebApp HTTP-сервер включён: %s:%s", config.API_HOST, config.API_PORT)
     if config.WEBAPP_URL:
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(text="🎵 Плеер",
@@ -131,7 +132,7 @@ async def main() -> None:
     # Webhook или Polling режим
     if config.WEBHOOK_ENABLED:
         if not config.WEBHOOK_URL:
-            logging.error("WEBHOOK_ENABLED=true, но WEBHOOK_URL не задан!")
+            logger.error("WEBHOOK_ENABLED=true, но WEBHOOK_URL не задан!")
             raise ValueError("WEBHOOK_URL обязателен при WEBHOOK_ENABLED=true")
 
         webhook_url = f"{config.WEBHOOK_URL}{config.WEBHOOK_PATH}"
@@ -140,7 +141,7 @@ async def main() -> None:
             secret_token=config.WEBHOOK_SECRET if config.WEBHOOK_SECRET else None,
             drop_pending_updates=True,
         )
-        logging.info("Webhook установлен: %s", webhook_url)
+        logger.info("Webhook установлен: %s", webhook_url)
 
         # Если API не включен, поднимаем aiohttp сервер только для webhook
         if not config.API_ENABLED:
@@ -156,22 +157,22 @@ async def main() -> None:
             await runner.setup()
             site = web.TCPSite(runner, host=config.API_HOST, port=config.API_PORT)
             await site.start()
-            logging.info("Webhook HTTP-сервер запущен: %s:%s", config.API_HOST, config.API_PORT)
+            logger.info("Webhook HTTP-сервер запущен: %s:%s", config.API_HOST, config.API_PORT)
 
-        logging.info("Бот запущен в webhook режиме")
+        logger.info("Бот запущен в webhook режиме")
         try:
             # Просто держим процесс активным
             while True:
                 await asyncio.sleep(3600)
         finally:
             await bot.delete_webhook()
-            logging.info("Webhook удалён")
+            logger.info("Webhook удалён")
             if runner is not None:
                 await runner.cleanup()
     else:
         # Polling режим
         await bot.delete_webhook(drop_pending_updates=True)
-        logging.info("Бот запущен в polling режиме")
+        logger.info("Бот запущен в polling режиме")
         try:
             await dp.start_polling(bot)
         finally:
@@ -183,7 +184,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Бот остановлен пользователем")
+        logger.info("Бот остановлен пользователем")
     except Exception:
-        logging.exception("Фатальная ошибка при старте/работе бота")
+        logger.exception("Фатальная ошибка при старте/работе бота")
         raise

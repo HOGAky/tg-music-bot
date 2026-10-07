@@ -1,6 +1,7 @@
 import logging
 import os
 
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import FSInputFile, Message
 
 from database import repo
@@ -69,7 +70,7 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
             )
             await _track_played(session, user_id, track, queue_name, position, queue_size)
             return True
-        except Exception as e:
+        except TelegramAPIError as e:
             logger.warning("file_id трека %s (%s) протух, перекачиваем: %s",
                            track.id, track.title, e)
             track.file_id = None
@@ -85,24 +86,28 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
     if own_status:
         status = await msg.answer("⏳ Скачиваю трек...")
     try:
-        result = await downloader.download(url, quality=quality)
+        result = await downloader.download(url, quality=quality, cache_key=track.s3_key)
     except Exception as e:
-        logger.exception("Ошибка скачивания url=%s track=%s (%s): %s",
-                         url, track.id, track.title, e)
+        logger.exception("Ошибка скачивания url=%s track=%s (%s)", url, track.id, track.title)
         if "Sign in to confirm" in str(e):
             # age-restricted: качаем тот же трек с SoundCloud (без возрастных ограничений)
             try:
-                result = await downloader.download_soundcloud_fallback(track, quality)
+                result = await downloader.download_soundcloud_fallback(
+                    track,
+                    quality,
+                    cache_key=track.s3_key,
+                )
                 logger.info("track=%s скачан с SoundCloud: %s", track.id, result.title)
-            except Exception as e2:
+            except Exception as e2:  # noqa: BLE001
                 logger.warning("SoundCloud fallback не сработал track=%s: %s", track.id, e2)
                 if not quiet:
                     try:
                         await status.edit_text(
                             "🔒 Трек скрыт возрастным ограничением YouTube, а на SoundCloud "
                             "его не нашлось. Попробуй другой вариант из поиска.")
-                    except Exception:
-                        pass
+                    except TelegramAPIError as edit_error:
+                        logger.debug("Не удалось обновить статус для age-restricted track=%s: %s",
+                                     track.id, edit_error)
                 return False
         else:
             if not quiet:
@@ -112,13 +117,13 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
                     reason = "⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска."
                 try:
                     await status.edit_text(reason)
-                except Exception:
-                    pass
+                except TelegramAPIError as edit_error:
+                    logger.debug("Не удалось обновить статус при ошибке скачивания track=%s: %s",
+                                 track.id, edit_error)
             return False
 
-    s3_key = storage.key_for(url, quality)  # трек выложен/взят из S3-кэша — запомним ключ
-    if storage.enabled and track.s3_key != s3_key:
-        track.s3_key = s3_key
+    if storage.enabled and result.cache_key and track.s3_key != result.cache_key:
+        track.s3_key = result.cache_key
         await session.commit()
 
     if os.path.getsize(result.path) > 49 * 1024 * 1024:  # лимит Telegram для ботов — 50 МБ
@@ -126,8 +131,9 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
         if not quiet:
             try:
                 await status.edit_text("⚠️ Трек слишком длинный — Telegram ограничивает ботов 50 МБ.")
-            except Exception:
-                pass
+            except TelegramAPIError as edit_error:
+                logger.debug("Не удалось обновить статус для большого файла track=%s: %s",
+                             track.id, edit_error)
         return False
 
     kwargs = dict(
@@ -142,25 +148,26 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
     try:
         audio_msg = await msg.answer_audio(
             thumbnail=FSInputFile(result.thumbnail) if result.thumbnail else None, **kwargs)
-    except Exception as e:
+    except TelegramAPIError as e:
         logger.warning("Отправка с обложкой не удалась track=%s (%s): %s — пробую без обложки",
                        track.id, track.title, e)
         try:
             audio_msg = await msg.answer_audio(**kwargs)
-        except Exception as e2:
-            logger.exception("Отправка трека в Telegram провалилась track=%s (%s): %s",
-                             track.id, track.title, e2)
+        except TelegramAPIError:
+            logger.exception("Отправка трека в Telegram провалилась track=%s (%s)",
+                             track.id, track.title)
             if not quiet:
                 try:
                     await status.edit_text("⚠️ Telegram отказался принимать трек 😔. Попробуй другой вариант.")
-                except Exception:
-                    pass
+                except TelegramAPIError as edit_error:
+                    logger.debug("Не удалось обновить статус после отказа Telegram track=%s: %s",
+                                 track.id, edit_error)
 
     # статус удаляем только при успехе: в случае ошибки там текст для пользователя
     if own_status and audio_msg is not None:
         try:
             await status.delete()
-        except Exception as del_e:
+        except TelegramAPIError as del_e:
             logger.debug("Не удалось удалить статус-сообщение: %s", del_e)
     _cleanup(result.path, result.thumbnail)
 

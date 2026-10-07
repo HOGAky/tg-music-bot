@@ -371,10 +371,9 @@ async def _fetch_oembed(url: str, ssl_ctx) -> dict:
     async with aiohttp.ClientSession(
         timeout=timeout,
         connector=aiohttp.TCPConnector(ssl=ssl_ctx),
-    ) as http:
-        async with http.get("https://open.spotify.com/oembed", params={"url": url}) as r:
-            r.raise_for_status()
-            return await r.json()
+    ) as http, http.get("https://open.spotify.com/oembed", params={"url": url}) as r:
+        r.raise_for_status()
+        return await r.json()
 
 
 async def _spotify_via_oembed(url: str) -> list[FoundTrack]:
@@ -441,7 +440,7 @@ async def _spotify_via_embed(kind: str, sid: str) -> list[FoundTrack]:
         logger.warning("Spotify embed недоступен: %s", e)
         return []
 
-    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
+    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.DOTALL)
     if not m:
         logger.warning("Spotify embed: не найден __NEXT_DATA__ для %s/%s", kind, sid)
         return []
