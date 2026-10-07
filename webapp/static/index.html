@@ -1,57 +1,221 @@
 <!doctype html>
 <html lang="ru"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Плеер</title>
 <style>
-body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000);padding-bottom:150px}
-h3{margin:16px 12px 4px}
-.track{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
-.track:active,.track.active{background:var(--tg-theme-secondary-bg-color,#eee)}
-.track .t{flex:1;min-width:0}.t1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.t2{opacity:.6;font-size:12px}
-#bar{position:fixed;bottom:0;left:0;right:0;background:var(--tg-theme-secondary-bg-color,#1c1d22);color:#fff;padding:10px 12px;display:none}
-#prog{height:4px;background:#555;margin:8px 0;border-radius:2px}#fill{height:100%;width:0;background:var(--tg-theme-button-color,#3390ec);border-radius:2px}
-button{background:var(--tg-theme-button-color,#3390ec);color:var(--tg-theme-button-text-color,#fff);border:0;border-radius:8px;padding:8px 14px;font-size:16px}
+:root{--bg:var(--tg-theme-bg-color,#fff);--bg2:var(--tg-theme-secondary-bg-color,#f0f0f0);
+--fg:var(--tg-theme-text-color,#000);--hint:var(--tg-theme-hint-color,#999);
+--accent:var(--tg-theme-button-color,#3390ec);--accent-fg:var(--tg-theme-button-text-color,#fff)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,system-ui,'Segoe UI',Roboto,sans-serif;margin:0;background:var(--bg);color:var(--fg);padding-bottom:84px;user-select:none}
+h3{margin:18px 14px 6px;font-size:15px;opacity:.7}
+button{border:0;background:none;color:var(--fg);font-size:22px;padding:6px;cursor:pointer}
+
+/* библиотека */
+.track{display:flex;align-items:center;gap:11px;padding:9px 14px;cursor:pointer}
+.track:active{background:var(--bg2)}
+.track .cov{width:44px;height:44px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:17px}
+.track .t{flex:1;min-width:0}.t1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+.t2{opacity:.55;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track.playing .t1{color:var(--accent)}
+.pill{display:inline-block;margin:6px 14px 2px;padding:7px 14px;border-radius:20px;background:var(--bg2);font-size:13.5px;cursor:pointer}
+.pill:active{opacity:.7}
+
+/* мини-плеер */
+#bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg2);display:none;cursor:pointer;z-index:5;box-shadow:0 -2px 12px rgba(0,0,0,.15)}
+#bar .line{height:2px;background:rgba(128,128,128,.3)}
+#bar .fill{height:100%;width:0;background:var(--accent)}
+#bar .row{display:flex;align-items:center;gap:10px;padding:8px 12px}
+#bar .cov{width:42px;height:42px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:16px}
+#bar .meta{flex:1;min-width:0}.m1{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m2{font-size:12px;opacity:.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* полноэкранный плеер */
+#full{position:fixed;inset:0;background:var(--bg);z-index:10;display:none;flex-direction:column;padding:14px 22px calc(16px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .25s ease}
+#full.open{transform:translateY(0)}
+#full .top{display:flex;align-items:center;justify-content:space-between}
+#full .top .lbl{font-size:12px;letter-spacing:1px;opacity:.5;text-transform:uppercase}
+#cover{width:min(78vw,320px);aspect-ratio:1;border-radius:18px;margin:18px auto 20px;display:flex;align-items:center;justify-content:center;font-size:84px;color:rgba(255,255,255,.85);font-weight:800;box-shadow:0 14px 40px rgba(0,0,0,.35)}
+#ftitle{font-size:20px;font-weight:700;text-align:center;line-height:1.25}
+#fartist{font-size:15px;opacity:.6;text-align:center;margin-top:4px}
+#seekwrap{margin:22px 2px 2px}
+#seek{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:rgba(128,128,128,.3);outline:none}
+#seek::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent)}
+#times{display:flex;justify-content:space-between;font-size:11.5px;opacity:.55;font-variant-numeric:tabular-nums}
+#controls{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:14px}
+#controls .big{width:64px;height:64px;border-radius:50%;background:var(--accent);color:var(--accent-fg);font-size:28px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+#controls .mid{font-size:30px}
+#controls .on{color:var(--accent)}
+#vol{margin-top:10px;display:flex;align-items:center;gap:10px;opacity:.75}
+#vol input{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;background:rgba(128,128,128,.3)}
+#vol input::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent)}
+#queuehead{margin:22px 0 4px;font-size:14px;font-weight:700}
+#queue{flex:1;overflow-y:auto;margin:0 -22px;padding:0 22px}
+#queue .track{padding:7px 0}
+#queue .track.playing{opacity:1}
+#queue .qnum{width:22px;font-size:12px;opacity:.45;text-align:center;flex:none}
 </style></head><body>
-<h3>❤️ Избранное</h3><div id="favs"></div><h3>📁 Плейлисты</h3><div id="pls"></div>
-<div id="bar">
-  <div id="now" style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
-  <div id="prog"><div id="fill"></div></div>
-  <div style="display:flex;gap:8px;justify-content:center">
-    <button onclick="toggleShuffle()">🔀</button><button onclick="prev()">⏮</button>
-    <button id="pp" onclick="togglePlay()">⏸</button><button onclick="next(true)">⏭</button>
+<h3>❤️ Избранное</h3><div id="favs"></div>
+<h3>📁 Плейлисты</h3><div id="pls"></div>
+
+<div id="bar" onclick="openPlayer()">
+  <div class="line"><div class="fill" id="miniFill"></div></div>
+  <div class="row">
+    <div class="cov" id="miniCov">♪</div>
+    <div class="meta"><div class="m1" id="miniTitle"></div><div class="m2" id="miniArtist"></div></div>
+    <button id="miniPP" onclick="event.stopPropagation();togglePlay()">▶</button>
+    <button onclick="event.stopPropagation();next(true)">⏭</button>
   </div>
 </div>
+
+<div id="full">
+  <div class="top">
+    <button onclick="closePlayer()">▼</button>
+    <div class="lbl">сейчас играет</div>
+    <div style="width:34px"></div>
+  </div>
+  <div id="cover">♪</div>
+  <div id="ftitle"></div><div id="fartist"></div>
+  <div id="seekwrap">
+    <input type="range" id="seek" min="0" max="1000" value="0" oninput="seekInput(this.value)">
+    <div id="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+  </div>
+  <div id="controls">
+    <button id="shuf" onclick="toggleShuffle()">🔀</button>
+    <button class="mid" onclick="prev()">⏮</button>
+    <div class="big" id="bigPP" onclick="togglePlay()">▶</div>
+    <button class="mid" onclick="next(true)">⏭</button>
+    <button id="rep" onclick="toggleRepeat()">🔁</button>
+  </div>
+  <div id="vol">🔉<input type="range" id="volR" min="0" max="100" value="80" oninput="setVol(this.value)"></div>
+  <div id="queuehead">Очередь</div>
+  <div id="queue"></div>
+</div>
+
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
 const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
 const qs = `?initData=${encodeURIComponent(tg.initData)}`;
-let lib={favorites:[],playlists:[]}, queue=[], idx=-1, shuffle=false;
-const audio=new Audio(), $=id=>document.getElementById(id);
-audio.addEventListener("ended",()=>next(false));
-audio.addEventListener("timeupdate",()=>{ if(audio.duration) $("fill").style.width=(audio.currentTime/audio.duration*100)+"%"; });
- $("prog").onclick=e=>{ if(audio.duration){ const r=$("prog").getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*audio.duration; } };
-const trackName=t=>(t.artist? t.artist+" — ":"")+t.title;
-async function load(){ const r=await fetch("/api/library"+qs); if(!r.ok){tg.showAlert("Ошибка авторизации");return;} lib=await r.json(); render(); }
-function row(list,i,name,sub){ const d=document.createElement("div"); d.className="track";
-  d.innerHTML=`<div class="t"><div class="t1">${name}</div>${sub?`<div class="t2">${sub}</div>`:""}</div>`;
-  d.onclick=()=>{ if(sub){ queue=list.tracks.slice(); idx=-1; shuffle?playAt(Math.floor(Math.random()*queue.length)):playAt(0); } else play(list,i); };
-  return d; }
-function render(){ const f=$("favs"); f.innerHTML="";
-  lib.favorites.forEach((t,i)=>f.appendChild(row(lib.favorites,i,trackName(t))));
-  const p=$("pls"); p.innerHTML="";
-  lib.playlists.forEach(pl=>p.appendChild(row(pl,0,"📁 "+pl.name,pl.tracks.length+" треков"))); }
-async function play(list,i){ queue=list.slice(); return playAt(i); }
-async function playAt(i){ if(!queue.length) return; idx=i; const t=queue[i];
-  document.querySelectorAll(".track").forEach(e=>e.classList.remove("active"));
-  $("now").textContent=trackName(t); $("bar").style.display="block";
-  audio.src=`/api/stream/${t.id}${qs}`;
-  try{ await audio.play(); $("pp").textContent="⏸"; }
-  catch(e){ tg.showAlert("Трек недоступен: сначала включи его один раз в чате"); } }
-function next(manual){ if(shuffle&&queue.length>1){ let r; do{r=Math.floor(Math.random()*queue.length);}while(r===idx); return playAt(r); }
-  if(idx+1<queue.length) playAt(idx+1); }
-function prev(){ if(audio.currentTime>3) audio.currentTime=0; else if(idx>0) playAt(idx-1); }
-function togglePlay(){ if(audio.paused){ audio.play(); $("pp").textContent="⏸"; } else { audio.pause(); $("pp").textContent="▶"; } }
-function toggleShuffle(){ shuffle=!shuffle; tg.HapticFeedback.impactOccurred("light"); }
+const $ = id => document.getElementById(id);
+let lib={favorites:[],playlists:[]}, queue=[], idx=-1, shuffle=false, repeat=false, wantPlay=false;
+const audio = new Audio(); audio.preload="none";
+audio.volume = +(localStorage.volume ?? 0.8); $("volR").value = audio.volume*100;
+
+const name = t => (t.artist? t.artist+" — " : "") + t.title;
+const fmt = s => { s=Math.max(0,Math.floor(s||0)); return `${s/60|0}:${(s%60+"").padStart(2,"0")}`; };
+const grad = t => { const hues=[[217,64],[262,52],[4,72],[26,68],[152,55],[196,60],[318,58],[258,64],[32,75],[356,55]][t.id%10];
+  return `linear-gradient(135deg,hsl(${hues[0]} ${hues[1]}%,45%),hsl(${(hues[0]+40)%360} ${(hues[1]+6)%100}%,32%))`; };
+const coverStyle = t => `background:${grad(t)};content:"${(t.artist||t.title||"♪").trim()[0].toUpperCase()}"`;
+
+/* ---------- библиотека ---------- */
+async function load(){
+  const r = await fetch("/api/library"+qs);
+  if(!r.ok){ tg.showAlert("Ошибка авторизации — открой плеер через кнопку меню в боте"); return; }
+  lib = await r.json(); render();
+}
+function trackRow(t, onPlay, playing){
+  const d = document.createElement("div"); d.className = "track"+(playing?" playing":"");
+  d.innerHTML = `<div class="cov" style="${coverStyle(t)}">${(t.artist||t.title||"♪").trim()[0].toUpperCase()}</div>
+    <div class="t"><div class="t1">${esc(name(t))}</div><div class="t2">${esc(t.artist||"")}</div></div>`;
+  d.onclick = onPlay; return d;
+}
+const esc = s => (s+"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function render(){
+  const f = $("favs"); f.innerHTML="";
+  lib.favorites.forEach((t,i)=> f.appendChild(trackRow(t, ()=>playList(lib.favorites,i), idx>=0&&queue[idx]&&queue[idx].id===t.id)));
+  const p = $("pls"); p.innerHTML="";
+  lib.playlists.forEach(pl=>{
+    p.appendChild(trackRow(pl, ()=>openPl(pl), true)).querySelector(".t1").textContent = "📁 "+pl.name;
+    if(pl.tracks.length){ const pill=document.createElement("div"); pill.className="pill"; pill.textContent="▶ Слушать всё";
+      pill.onclick=()=>playList(pl.tracks,0); p.appendChild(pill); }
+  });
+}
+function openPl(pl){
+  queue = pl.tracks.slice(); idx = -1;
+  playAt(shuffle ? Math.floor(Math.random()*queue.length) : 0);
+  openPlayer();
+}
+function playList(list, i){ queue = list.slice(); return playAt(i); }
+
+/* ---------- воспроизведение ---------- */
+async function playAt(i){
+  if(!queue.length) return;
+  idx = i; wantPlay = true;
+  const t = queue[i];
+  $("miniTitle").textContent = name(t); $("miniArtist").textContent = t.artist||"";
+  $("miniCov").style.background = grad(t); $("miniCov").textContent = (t.artist||t.title||"♪").trim()[0].toUpperCase();
+  $("bar").style.display = "block";
+  setPlayIcon("⌛");
+  audio.src = `/api/stream/${t.id}${qs}`;
+  try{ await audio.play(); }catch(e){ tg.showAlert("Трек пока недоступен — включи его один раз в чате, потом он будет играть здесь"); setPlayIcon("▶"); }
+  if("mediaSession" in navigator){
+    navigator.mediaSession.metadata = new MediaMetadata({title:t.title, artist:t.artist||"", album:"tg-music-bot"});
+  }
+  renderQueue(); render(); highlightFull(t);
+}
+function setPlayIcon(s){ $("miniPP").textContent=s; $("bigPP").textContent=s; }
+function togglePlay(){
+  if(idx<0) return;
+  if(audio.paused){ audio.play().catch(()=>{}); } else audio.pause();
+}
+audio.addEventListener("playing", ()=>setPlayIcon("⏸"));
+audio.addEventListener("pause",   ()=>setPlayIcon("▶"));
+audio.addEventListener("waiting", ()=>setPlayIcon("⌛"));
+audio.addEventListener("ended", ()=>{ if(repeat) playAt(idx); else next(false); });
+audio.addEventListener("error", ()=>{ if(idx>=0 && audio.src){ tg.showAlert("Трек недоступен — попробуй позже или включи один раз в чате"); setPlayIcon("▶"); } });
+audio.addEventListener("timeupdate", ()=>{
+  if(!audio.duration) return;
+  const p = audio.currentTime/audio.duration;
+  $("miniFill").style.width = p*100+"%";
+  if(!seeking){ $("seek").value = p*1000; $("cur").textContent = fmt(audio.currentTime); }
+});
+audio.addEventListener("loadedmetadata", ()=>{ $("dur").textContent = fmt(audio.duration); });
+function next(manual){
+  if(!queue.length) return;
+  if(shuffle && queue.length>1){ let r; do{ r=Math.floor(Math.random()*queue.length); }while(r===idx); return playAt(r); }
+  if(idx+1 < queue.length) return playAt(idx+1);
+  if(manual || repeat) playAt(0);
+}
+function prev(){ if(audio.currentTime>3){ audio.currentTime=0; return; } if(idx>0) playAt(idx-1); else playAt(idx); }
+function toggleShuffle(){ shuffle=!shuffle; $("shuf").classList.toggle("on",shuffle); tg.HapticFeedback.impactOccurred("light"); }
+function toggleRepeat(){ repeat=!repeat; $("rep").classList.toggle("on",repeat); tg.HapticFeedback.impactOccurred("light"); }
+function setVol(v){ audio.volume=v/100; localStorage.volume=v/100; }
+
+/* перемотка */
+let seeking=false;
+function seekInput(v){ if(!audio.duration) return; seeking=true;
+  $("cur").textContent = fmt(v/1000*audio.duration); }
+$("seek").addEventListener("change", e=>{ if(audio.duration) audio.currentTime = e.target.value/1000*audio.duration; seeking=false; });
+
+/* Media Session (локскрин) */
+if("mediaSession" in navigator){
+  navigator.mediaSession.setActionHandler("play",  ()=>audio.play());
+  navigator.mediaSession.setActionHandler("pause", ()=>audio.pause());
+  navigator.mediaSession.setActionHandler("previoustrack", prev);
+  navigator.mediaSession.setActionHandler("nexttrack", ()=>next(true));
+}
+
+/* ---------- полноэкранный плеер ---------- */
+function highlightFull(t){
+  $("ftitle").textContent = t.title; $("fartist").textContent = t.artist||"";
+  $("cover").style.background = grad(t); $("cover").textContent = (t.artist||t.title||"♪").trim()[0].toUpperCase();
+}
+function openPlayer(){ if(idx<0) return; $("full").style.display="flex";
+  requestAnimationFrame(()=>$("full").classList.add("open"));
+  tg.BackButton.show(); renderQueue(); tg.HapticFeedback.impactOccurred("light"); }
+function closePlayer(){ $("full").classList.remove("open");
+  setTimeout(()=>$("full").style.display="none",260); tg.BackButton.hide(); }
+tg.onEvent("backButtonClicked", closePlayer);
+
+function renderQueue(){
+  const q = $("queue"); q.innerHTML="";
+  queue.forEach((t,i)=>{
+    const d = trackRow(t, ()=>playAt(i), i===idx);
+    const n = document.createElement("div"); n.className="qnum"; n.textContent = i===idx ? "▶" : (i+1);
+    d.prepend(n); q.appendChild(d);
+  });
+}
+
+/* ---------- пустые обложки: стабильный градиент по id трека ---------- */
 load();
 </script></body></html>
