@@ -50,7 +50,6 @@ AGENTS.md
 
 # Scripts
 run.bat
-scripts/
 
 # Ruff cache
 .ruff_cache/

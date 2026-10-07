@@ -53,8 +53,10 @@ def _download_sync(url: str, out_dir: str, quality: int) -> DownloadResult:
             "preferredquality": str(quality),
         }],
     }
-    if os.path.exists("cookies.txt"):  # опционально: обходим ограничения YouTube
-        opts["cookiefile"] = "cookies.txt"
+    # cookies.json/cookies.txt для YouTube: кладём в data/ (volume) без пересборки
+    cookies = next((p for p in ("cookies.txt", "data/cookies.txt") if os.path.exists(p)), None)
+    if cookies:  # опционально: обходим ограничения YouTube
+        opts["cookiefile"] = cookies
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)

@@ -2,7 +2,7 @@ aiogram>=3.7,<4
 pydantic-settings>=2.0
 SQLAlchemy[asyncio]>=2.0
 aiosqlite>=0.20
-yt-dlp>=2024.12.13
+yt-dlp
 ytmusicapi>=1.8
 spotipy>=2.24
 yandex-music>=2.1

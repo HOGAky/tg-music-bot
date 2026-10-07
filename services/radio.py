@@ -34,12 +34,17 @@ async def similar_tracks(source_url: str, artist: str, title: str,
     """Похожие треки: радио YT Music по видео, иначе — поиск по артисту."""
     match = VIDEO_ID_RE.search(source_url or "")
     if match:
-        try:
-            tracks = await asyncio.to_thread(_radio_sync, match.group(1), limit)
-        except Exception as e:
-            logger.warning("YTMusic радио не сработало vid=%s artist=%r title=%r: %s",
-                           match.group(1), artist, title, e)
-            tracks = []
+        tracks = []
+        for attempt in range(1, 4):  # соединения из облака иногда рвутся — повторяем
+            try:
+                tracks = await asyncio.to_thread(_radio_sync, match.group(1), limit)
+                break
+            except Exception as e:
+                if attempt == 3:
+                    logger.warning("YTMusic радио не сработало после 3 попыток vid=%s: %s",
+                                   match.group(1), e)
+                else:
+                    await asyncio.sleep(0.8 * attempt)
         if tracks:
             logger.info("Радио: по %r — %r найдено %s похожих через YTMusic",
                         artist, title, len(tracks))

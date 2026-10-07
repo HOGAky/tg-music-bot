@@ -90,8 +90,15 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
         logger.exception("Ошибка скачивания url=%s track=%s (%s): %s",
                          url, track.id, track.title, e)
         if not quiet:
+            if "Sign in to confirm" in str(e):
+                reason = ("🔒 YouTube требует вход для этого трека (возрастное ограничение "
+                          "или проверка бота). Попробуй другой вариант из поиска.")
+            elif "Private video" in str(e) or "unavailable" in str(e).lower():
+                reason = "🔒 Видео недоступно или приватное. Попробуй другой вариант из поиска."
+            else:
+                reason = "⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска."
             try:
-                await status.edit_text("⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска.")
+                await status.edit_text(reason)
             except Exception:
                 pass
         return False

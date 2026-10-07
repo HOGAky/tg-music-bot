@@ -5,7 +5,9 @@ from logging.handlers import RotatingFileHandler
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.middlewares.base import BaseRequestMiddleware
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
@@ -68,6 +70,27 @@ async def _make_dispatcher() -> Dispatcher:
         return Dispatcher()
 
 
+class RetryOnNetworkError(BaseRequestMiddleware):
+    """Повторяем запросы к Telegram при сетевых сбоях: из облака часть новых
+    соединений к api.telegram.org рвётся — повтор обычно проходит."""
+
+    def __init__(self, attempts: int = 3) -> None:
+        self._attempts = attempts
+
+    async def __call__(self, method, session, bot, request_timeout=None, *args, **kwargs):
+        for attempt in range(1, self._attempts + 1):
+            try:
+                return await session.make_request(bot, method, request_timeout=request_timeout)
+            except TelegramRetryAfter as e:
+                if attempt == self._attempts:
+                    raise
+                await asyncio.sleep(e.retry_after + 0.5)
+            except TelegramNetworkError:
+                if attempt == self._attempts:
+                    raise
+                await asyncio.sleep(1.5 * attempt)
+
+
 async def main() -> None:
     _setup_logging()
     logging.info("=== musicbot запускается ===")
@@ -78,6 +101,7 @@ async def main() -> None:
 
     bot = Bot(token=config.BOT_TOKEN,
               default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot.session.middleware(RetryOnNetworkError())
     dp = await _make_dispatcher()
     # ВАЖНО: playlists/favorites ДО search — FSM-состояния должны ловить текст раньше поиска
     dp.include_routers(common.router, favorites.router, player.router, playlists.router,
