@@ -3,16 +3,18 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, quote
 
 import aiohttp
 from aiohttp import web
 
 from config import config
 from database import repo
+from database.models import Track
 from database.session import SessionFactory
-from services import downloader
+from services import downloader, radio, searcher
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,18 @@ async def library(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
+async def _prepare_track(track: Track, quality: int) -> str:
+    """Файл mp3 для трека: YouTube, а при age-restricted — SoundCloud."""
+    url = track.download_url or track.source_url
+    try:
+        result = await downloader.download(url, quality=quality)
+    except Exception as e:
+        if "Sign in to confirm" not in str(e):
+            raise
+        result = await downloader.download_soundcloud_fallback(track, quality)
+    return result.path
+
+
 async def stream(request: web.Request) -> web.StreamResponse:
     user_id = _user_id(request)
     track_id = int(request.match_info["track_id"])
@@ -82,16 +96,164 @@ async def stream(request: web.Request) -> web.StreamResponse:
             raise web.HTTPNotFound(text="track not found")
         user = await repo.get_user(session, user_id)
         quality = user.quality if user is not None else 192
-        url = track.download_url or track.source_url
 
     try:
-        result = await downloader.download(url, quality=quality)
+        path = await _prepare_track(track, quality)
     except Exception:
         logger.exception("Не удалось подготовить трек %s для плеера", track_id)
         raise web.HTTPBadGateway(text="download failed")
 
     downloader.prune_cache()
-    return web.FileResponse(result.path, headers={"Content-Type": "audio/mpeg"})
+    return web.FileResponse(path, headers={"Content-Type": "audio/mpeg"})
+
+
+async def _json_body(request: web.Request) -> dict:
+    try:
+        body = await request.json()
+        return body if isinstance(body, dict) else {}
+    except Exception:
+        return {}
+
+
+def _playlist_json(pl) -> dict:
+    return {"id": pl.id, "name": pl.name, "tracks": [_track_json(t) for t in pl.tracks]}
+
+
+async def search_api(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    q = (request.query.get("q") or "").strip()
+    if not q:
+        return web.json_response({"results": []})
+    found = await searcher.search(q, limit=15)
+    async with SessionFactory() as session:
+        await repo.get_or_create_user(session, user_id, None)
+        tracks = [await repo.upsert_track(session, source_url=f.source_url, title=f.title,
+                                          artist=f.artist, duration=f.duration,
+                                          download_url=f.download_url) for f in found]
+        tracks = [t for t in tracks if t is not None]
+        favorites = {t.id for t in await repo.get_favorites(session, user_id, limit=500)}
+    out = [_track_json(t) | {"favorite": t.id in favorites} for t in tracks]
+    return web.json_response({"results": out})
+
+
+async def radio_api(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    track_id = int(request.match_info["track_id"])
+    async with SessionFactory() as session:
+        track = await repo.get_track(session, track_id)
+        if track is None:
+            raise web.HTTPNotFound(text="track not found")
+    found = await radio.similar_tracks(track.source_url, track.artist, track.title, limit=10)
+    async with SessionFactory() as session:
+        tracks = [await repo.upsert_track(session, source_url=f.source_url, title=f.title,
+                                          artist=f.artist, duration=f.duration,
+                                          download_url=f.download_url) for f in found]
+        tracks = [t for t in tracks if t is not None and t.id != track_id]
+    return web.json_response({"results": [_track_json(t) for t in tracks]})
+
+
+async def download_api(request: web.Request) -> web.FileResponse:
+    user_id = _user_id(request)
+    track_id = int(request.match_info["track_id"])
+    async with SessionFactory() as session:
+        track = await repo.get_track(session, track_id)
+        if track is None:
+            raise web.HTTPNotFound(text="track not found")
+        user = await repo.get_user(session, user_id)
+        quality = user.quality if user is not None else 192
+    try:
+        path = await _prepare_track(track, quality)
+    except Exception:
+        logger.exception("Не удалось отдать файл трека %s", track_id)
+        raise web.HTTPBadGateway(text="download failed")
+    safe = re.sub(r"[^\w\s.\-]", "", f"{track.artist} {track.title}").strip() or f"track_{track_id}"
+    utf8 = quote(f"{track.artist} - {track.title}.mp3")
+    return web.FileResponse(path, headers={
+        "Content-Type": "audio/mpeg",
+        "Content-Disposition": f'attachment; filename="{safe[:64]}.mp3"; filename*=UTF-8\'\'{utf8}',
+    })
+
+
+async def history_api(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    async with SessionFactory() as session:
+        tracks = await repo.recent_tracks(session, user_id, limit=15)
+    return web.json_response({"recent": [_track_json(t) for t in tracks]})
+
+
+async def favorites_toggle(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    body = await _json_body(request)
+    track_id = int(body.get("track_id") or 0)
+    async with SessionFactory() as session:
+        track = await repo.get_track(session, track_id)
+        if track is None:
+            raise web.HTTPNotFound(text="track not found")
+        if await repo.is_favorite(session, user_id, track_id):
+            await repo.remove_favorite(session, user_id, track_id)
+            fav = False
+        else:
+            await repo.add_favorite(session, user_id, track_id)
+            fav = True
+    return web.json_response({"favorite": fav})
+
+
+async def playlist_create(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    name = (await _json_body(request)).get("name", "").strip()
+    if not name:
+        raise web.HTTPBadRequest(text="name required")
+    async with SessionFactory() as session:
+        await repo.get_or_create_user(session, user_id, None)
+        pl = await repo.create_playlist(session, user_id, name[:64])
+        out = _playlist_json(pl)
+    return web.json_response(out)
+
+
+def _own_playlist(pl, user_id: int) -> None:
+    if pl is None or pl.user_id != user_id:
+        raise web.HTTPForbidden(text="not your playlist")
+
+
+async def playlist_rename(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    pl_id = int(request.match_info["playlist_id"])
+    name = (await _json_body(request)).get("name", "").strip()
+    if not name:
+        raise web.HTTPBadRequest(text="name required")
+    async with SessionFactory() as session:
+        _own_playlist(await repo.get_playlist(session, pl_id), user_id)
+        ok = await repo.rename_playlist(session, user_id, pl_id, name)
+    return web.json_response({"ok": ok})
+
+
+async def playlist_delete(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    pl_id = int(request.match_info["playlist_id"])
+    async with SessionFactory() as session:
+        _own_playlist(await repo.get_playlist(session, pl_id), user_id)
+        ok = await repo.delete_playlist(session, user_id, pl_id)
+    return web.json_response({"ok": ok})
+
+
+async def playlist_add(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    pl_id = int(request.match_info["playlist_id"])
+    track_id = int((await _json_body(request)).get("track_id") or 0)
+    async with SessionFactory() as session:
+        _own_playlist(await repo.get_playlist(session, pl_id), user_id)
+        added = await repo.add_track_to_playlist(session, pl_id, track_id)
+    return web.json_response({"added": added})
+
+
+async def playlist_remove(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    pl_id = int(request.match_info["playlist_id"])
+    track_id = int((await _json_body(request)).get("track_id") or 0)
+    async with SessionFactory() as session:
+        _own_playlist(await repo.get_playlist(session, pl_id), user_id)
+        await repo.remove_track_from_playlist(session, pl_id, track_id)
+    return web.json_response({"ok": True})
 
 
 async def healthz(_: web.Request) -> web.Response:
@@ -152,13 +314,25 @@ async def tunnel_alive() -> bool:
 
 
 async def index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    # no-store: webview Telegram не должен показывать устаревшую страницу
+    return web.FileResponse(os.path.join(STATIC_DIR, "index.html"),
+                            headers={"Cache-Control": "no-store"})
 
 
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/api/library", library)
     app.router.add_get(r"/api/stream/{track_id:\d+}", stream)
+    app.router.add_get(r"/api/download/{track_id:\d+}", download_api)
+    app.router.add_get("/api/search", search_api)
+    app.router.add_get(r"/api/radio/{track_id:\d+}", radio_api)
+    app.router.add_get("/api/history", history_api)
+    app.router.add_post("/api/favorites/toggle", favorites_toggle)
+    app.router.add_post("/api/playlist/create", playlist_create)
+    app.router.add_post(r"/api/playlist/{playlist_id:\d+}/rename", playlist_rename)
+    app.router.add_post(r"/api/playlist/{playlist_id:\d+}/delete", playlist_delete)
+    app.router.add_post(r"/api/playlist/{playlist_id:\d+}/add", playlist_add)
+    app.router.add_post(r"/api/playlist/{playlist_id:\d+}/remove", playlist_remove)
     app.router.add_get(r"/api/batch/{key:[A-Za-z0-9]+}", batch_zip)
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/app", index)

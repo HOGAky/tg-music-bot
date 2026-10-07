@@ -186,3 +186,22 @@ async def remove_track_from_playlist(session: AsyncSession, playlist_id: int, tr
     await session.execute(delete(PlaylistTrack).where(
         PlaylistTrack.playlist_id == playlist_id, PlaylistTrack.track_id == track_id))
     await session.commit()
+
+
+async def rename_playlist(session: AsyncSession, user_id: int, playlist_id: int, name: str) -> bool:
+    pl = await session.get(Playlist, playlist_id)
+    if pl is None or pl.user_id != user_id:
+        return False
+    pl.name = name.strip()[:64]
+    await session.commit()
+    return True
+
+
+async def recent_tracks(session: AsyncSession, user_id: int, limit: int = 15) -> list[Track]:
+    """Недавно прослушанные пользователем (уникальные, по свежести)."""
+    stmt = (select(Track).join(TrackPlay, TrackPlay.track_id == Track.id)
+            .where(TrackPlay.user_id == user_id)
+            .group_by(Track.id)
+            .order_by(func.max(TrackPlay.created_at).desc())
+            .limit(limit))
+    return list((await session.scalars(stmt)).all())
