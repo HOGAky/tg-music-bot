@@ -206,7 +206,8 @@ async def playlist_create(request: web.Request) -> web.Response:
     async with SessionFactory() as session:
         await repo.get_or_create_user(session, user_id, None)
         pl = await repo.create_playlist(session, user_id, name[:64])
-        out = _playlist_json(pl)
+        # новый плейлист пуст; pl.tracks здесь трогать нельзя — ленивый LOAD в async-сессии
+        out = {"id": pl.id, "name": pl.name, "tracks": []}
     return web.json_response(out)
 
 
