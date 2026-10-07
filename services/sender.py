@@ -89,19 +89,32 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
     except Exception as e:
         logger.exception("Ошибка скачивания url=%s track=%s (%s): %s",
                          url, track.id, track.title, e)
-        if not quiet:
-            if "Sign in to confirm" in str(e):
-                reason = ("🔒 YouTube требует вход для этого трека (возрастное ограничение "
-                          "или проверка бота). Попробуй другой вариант из поиска.")
-            elif "Private video" in str(e) or "unavailable" in str(e).lower():
-                reason = "🔒 Видео недоступно или приватное. Попробуй другой вариант из поиска."
-            else:
-                reason = "⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска."
+        if "Sign in to confirm" in str(e):
+            # age-restricted: качаем тот же трек с SoundCloud (без возрастных ограничений)
             try:
-                await status.edit_text(reason)
-            except Exception:
-                pass
-        return False
+                result = await downloader.download_soundcloud_fallback(track, quality)
+                logger.info("track=%s скачан с SoundCloud: %s", track.id, result.title)
+            except Exception as e2:
+                logger.warning("SoundCloud fallback не сработал track=%s: %s", track.id, e2)
+                if not quiet:
+                    try:
+                        await status.edit_text(
+                            "🔒 Трек скрыт возрастным ограничением YouTube, а на SoundCloud "
+                            "его не нашлось. Попробуй другой вариант из поиска.")
+                    except Exception:
+                        pass
+                return False
+        else:
+            if not quiet:
+                if "Private video" in str(e) or "unavailable" in str(e).lower():
+                    reason = "🔒 Видео недоступно или приватное. Попробуй другой вариант из поиска."
+                else:
+                    reason = "⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска."
+                try:
+                    await status.edit_text(reason)
+                except Exception:
+                    pass
+            return False
 
     s3_key = storage.key_for(url, quality)  # трек выложен/взят из S3-кэша — запомним ключ
     if storage.enabled and track.s3_key != s3_key:

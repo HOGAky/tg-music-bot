@@ -37,6 +37,10 @@ class Config(BaseSettings):
     S3_REGION: str = "ru-central1"
     S3_CACHE_PREFIX: str = "musicbot/"
 
+    # публичный client_id веб-плеера SoundCloud (api-v2); обновляется
+    # переизвлечением со страницы soundcloud.com, если однажды протухнет
+    SOUNDCLOUD_CLIENT_ID: str = "tALhrIHY34p48SpHQCwLnMs3ivsiyNZI"
+
     # ---- Redis (FSM + кэш, мультиинстансность) ----
     REDIS_URL: str = ""                      # e.g., redis://localhost:6379/0
     USE_REDIS: bool = False

@@ -3,6 +3,7 @@ import logging
 import os
 from dataclasses import dataclass
 
+import requests
 import yt_dlp
 
 from config import config
@@ -11,6 +12,10 @@ from services.storage import storage
 logger = logging.getLogger(__name__)
 
 CACHE_LIMIT_BYTES = 1_500_000_000
+
+# сайт soundcloud.com из облака заблокирован, но api-v2 и CDN доступны:
+# через них качаем треки, которые YouTube прячет за возрастным ограничением
+_SC_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0"}
 
 _semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_DOWNLOADS)
 _locks: dict[str, asyncio.Lock] = {}
@@ -105,6 +110,72 @@ def prune_cache(limit: int = CACHE_LIMIT_BYTES) -> None:
             total -= size
         except OSError:
             pass
+
+
+# ---------- SoundCloud fallback для age-restricted треков ----------
+def _sc_search_sync(query: str, client_id: str, limit: int = 5) -> list[dict]:
+    r = requests.get("https://api-v2.soundcloud.com/search/tracks",
+                     params={"q": query, "client_id": client_id, "limit": limit},
+                     timeout=15, headers=_SC_HEADERS)
+    r.raise_for_status()
+    return (r.json() or {}).get("collection") or []
+
+
+def _sc_pick_best(collection: list[dict], duration: int | None) -> dict | None:
+    candidates = [t for t in collection
+                  if t.get("policy") == "ALLOW"
+                  and any(tr.get("format", {}).get("protocol") == "progressive"
+                          for tr in (t.get("media", {}).get("transcodings") or []))]
+    if not candidates:
+        return None
+    if duration:
+        return min(candidates, key=lambda t: abs((t.get("duration") or 0) // 1000 - duration))
+    return candidates[0]
+
+
+def _sc_download_sync(track_json: dict, client_id: str, out_dir: str) -> str:
+    """progressive-mp3: транскодинг отдаёт JSON с подписанной ссылкой на CDN."""
+    prog = next(tr for tr in track_json["media"]["transcodings"]
+                if tr.get("format", {}).get("protocol") == "progressive")
+    r = requests.get(prog["url"], params={"client_id": client_id},
+                     timeout=20, headers=_SC_HEADERS)
+    r.raise_for_status()
+    media_url = (r.json() or {}).get("url")
+    if not media_url:
+        raise RuntimeError("SoundCloud не отдал ссылку на поток")
+    path = os.path.join(out_dir, f"sc_{track_json['id']}.mp3")
+    with requests.get(media_url, stream=True, timeout=90, headers=_SC_HEADERS) as resp:
+        resp.raise_for_status()
+        size = 0
+        with open(path, "wb") as f:
+            for chunk in resp.iter_content(65536):
+                f.write(chunk)
+                size += len(chunk)
+    if size < 10_000:
+        raise RuntimeError("файл слишком мал — не похож на трек")
+    return path
+
+
+async def download_soundcloud_fallback(track, quality: int = 128) -> DownloadResult:
+    """Age-restricted на YouTube: ищем тот же трек на SoundCloud и качаем
+    progressive-mp3 (128 kbps) напрямую через api-v2 + sndcdn."""
+    client_id = config.SOUNDCLOUD_CLIENT_ID
+    if not client_id:
+        raise RuntimeError("SOUNDCLOUD_CLIENT_ID не задан")
+    query = f"{track.artist} {track.title}".strip() or track.title
+    collection = await asyncio.to_thread(_sc_search_sync, query, client_id)
+    best = _sc_pick_best(collection, track.duration)
+    if best is None:
+        raise RuntimeError("на SoundCloud нет подходящего доступного трека")
+    os.makedirs(config.CACHE_DIR, exist_ok=True)
+    path = await asyncio.to_thread(_sc_download_sync, best, client_id, config.CACHE_DIR)
+    logger.info("SoundCloud fallback: %r -> %s", query, best.get("permalink_url"))
+    return DownloadResult(
+        path=path,
+        title=best.get("title") or track.title,
+        duration=(best.get("duration") or 0) // 1000 or track.duration,
+        thumbnail=None,
+    )
 
 
 async def download(url: str, quality: int = 192) -> DownloadResult:
