@@ -73,12 +73,19 @@ async def on_text(message: Message):
             )
             return
 
-        tracks = [
-            await repo.upsert_track(
-                session, source_url=f.source_url, title=f.title, artist=f.artist,
-                duration=f.duration, download_url=f.download_url)
-            for f in found
-        ]
+        try:
+            tracks = [
+                await repo.upsert_track(
+                    session, source_url=f.source_url, title=f.title, artist=f.artist,
+                    duration=f.duration, download_url=f.download_url)
+                for f in found
+            ]
+            tracks = [t for t in tracks if t is not None]
+        except Exception as e:
+            # не оставляем пользователя с молчаливым «Ищу...» при любой ошибке БД
+            logger.exception("Не удалось сохранить результаты по %r: %s", text, e)
+            await message.answer("⚠️ Нашёл треки, но не смог их сохранить. Попробуй ещё раз через минуту.")
+            return
         try:
             await status.delete()
         except Exception as e:

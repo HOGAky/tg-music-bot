@@ -115,11 +115,18 @@ def _ytm_search_sync(query: str, limit: int) -> list[FoundTrack]:
 
 
 async def search(query: str, limit: int = 8) -> list[FoundTrack]:
-    try:
-        return await asyncio.to_thread(_ytm_search_sync, query, limit)
-    except Exception as e:
-        logger.exception("Ошибка поиска по %r: %s", query, e)
-        return []
+    """Поиск с ретраями: часть соединений из облака рвётся по SSL —
+    повторная попытка обычно проходит."""
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            return await asyncio.to_thread(_ytm_search_sync, query, limit)
+        except Exception as e:
+            last_exc = e
+            logger.warning("Поиск %r: попытка %s не удалась: %s", query, attempt, e)
+            await asyncio.sleep(0.8 * attempt)
+    logger.error("Поиск %r не удался после 3 попыток: %s", query, last_exc)
+    return []
 
 
 # ---------- метаданные для "прочих" ссылок через yt-dlp ----------

@@ -47,24 +47,28 @@ async def upsert_track(
     session: AsyncSession, *, source_url: str, title: str, artist: str,
     duration: int | None, download_url: str | None = None,
 ) -> Track:
+    """Создаёт или обновляет трек. Безопасно при гонке двух одинаковых запросов:
+    если конкурент ещё не закоммитил свою вставку, повторяем цикл, пока строка
+    не появится — None не возвращаем никогда."""
     stmt = select(Track).where(Track.source_url == source_url)
-    track = (await session.scalars(stmt)).first()
-    if track is not None:
-        track.title = title or track.title
-        track.artist = artist or track.artist
-        track.duration = duration or track.duration
-        track.download_url = download_url or track.download_url
-        await session.commit()
-        return track
-    track = Track(source_url=source_url, title=title, artist=artist,
-                  duration=duration, download_url=download_url)
-    session.add(track)
-    try:
-        await session.commit()
-    except IntegrityError:  # гонка двух одинаковых запросов
-        await session.rollback()
+    for _ in range(8):
         track = (await session.scalars(stmt)).first()
-    return track
+        if track is not None:
+            track.title = title or track.title
+            track.artist = artist or track.artist
+            track.duration = duration or track.duration
+            track.download_url = download_url or track.download_url
+            await session.commit()
+            return track
+        track = Track(source_url=source_url, title=title, artist=artist,
+                      duration=duration, download_url=download_url)
+        session.add(track)
+        try:
+            await session.commit()
+            return track
+        except IntegrityError:  # конкурент вставляет эту же строку прямо сейчас
+            await session.rollback()
+    raise RuntimeError(f"upsert_track: не удалось вставить/прочитать трек {source_url}")
 
 
 async def get_track(session: AsyncSession, track_id: int) -> Track | None:
