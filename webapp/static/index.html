@@ -175,7 +175,8 @@ h3{margin:18px 14px 6px;font-size:15px;opacity:.65}
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
 const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
-const qs = `?initData=${encodeURIComponent(tg.initData)}`;
+/* initData добавляем к существующему ?v=… (антикэш), если он есть */
+const qs = (location.search ? location.search + "&" : "?") + "initData=" + encodeURIComponent(tg.initData);
 const $ = id => document.getElementById(id);
 const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const name = t => (t.artist? t.artist+" — " : "") + t.title;

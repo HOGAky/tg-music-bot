@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from logging.handlers import RotatingFileHandler
 
 from aiogram import Bot, Dispatcher
@@ -14,6 +15,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from config import config
 from database.session import init_db
 from handlers import common, favorites, inline, player, playlists, search, track_tools
+from utils import bust_url
 from webapp.app import start_webapp
 
 
@@ -123,7 +125,8 @@ async def main() -> None:
         logging.info("WebApp HTTP-сервер включён: %s:%s", config.API_HOST, config.API_PORT)
     if config.WEBAPP_URL:
         await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="🎵 Плеер", web_app=WebAppInfo(url=config.WEBAPP_URL)))
+            menu_button=MenuButtonWebApp(text="🎵 Плеер",
+                                         web_app=WebAppInfo(url=bust_url(config.WEBAPP_URL))))
 
     # Webhook или Polling режим
     if config.WEBHOOK_ENABLED:

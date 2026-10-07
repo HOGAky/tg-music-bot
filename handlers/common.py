@@ -6,6 +6,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
 from config import config
 from database import repo
 from database.session import SessionFactory
+from utils import bust_url
 
 router = Router(name="common")
 
@@ -36,7 +37,7 @@ async def cmd_start(message: Message):
     if config.WEBAPP_URL:
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🎵 Открыть плеер",
-                                 web_app=WebAppInfo(url=config.WEBAPP_URL)),
+                                 web_app=WebAppInfo(url=bust_url(config.WEBAPP_URL))),
         ]])
     await message.answer(START_TEXT, reply_markup=kb)
 

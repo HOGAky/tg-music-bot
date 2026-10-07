@@ -1,5 +1,14 @@
+import time
+
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+
+
+def bust_url(url: str) -> str:
+    """Каждый запуск бота даёт новый URL плеера (?v=таймстамп) —
+    webview iOS не отдаёт устаревший кэш страницы."""
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}v={int(time.time())}"
 
 
 def msg_of(callback: CallbackQuery) -> Message | None:
