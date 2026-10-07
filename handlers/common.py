@@ -1,7 +1,9 @@
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
+                           Message, WebAppInfo)
 
+from config import config
 from database import repo
 from database.session import SessionFactory
 
@@ -30,7 +32,13 @@ START_TEXT = """🎧 <b>Музыкальный бот</b>
 async def cmd_start(message: Message):
     async with SessionFactory() as session:
         await repo.get_or_create_user(session, message.from_user.id, message.from_user.username)
-    await message.answer(START_TEXT)
+    kb = None
+    if config.WEBAPP_URL:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🎵 Открыть плеер",
+                                 web_app=WebAppInfo(url=config.WEBAPP_URL)),
+        ]])
+    await message.answer(START_TEXT, reply_markup=kb)
 
 
 @router.message(Command("help"))

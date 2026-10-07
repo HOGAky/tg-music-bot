@@ -14,6 +14,17 @@ _SEP_RE = re.compile(r"\s*[—\-–|/\\,:]\s*feat\.?\s*", re.IGNORECASE)
 _WS_RE = re.compile(r"\s+")
 
 
+def _parse_lrc(lrc: str) -> list[list]:
+    """LRC-строки -> [[секунда, текст], ...] (для караоке-подсветки)."""
+    out = []
+    for line in (lrc or "").splitlines():
+        m = re.match(r"\[(\d+):(\d+(?:\.\d+)?)\](.*)", line)
+        if m and m.group(3).strip():
+            out.append([int(m.group(1)) * 60 + float(m.group(2)), m.group(3).strip()])
+    out.sort(key=lambda x: x[0])
+    return out
+
+
 def _normalize(s: str) -> str:
     """Убираем скобки с feat/remix/official/video, лишние пробелы и разделители."""
     if not s:
@@ -31,7 +42,7 @@ def _ssl_context():
         return None
 
 
-async def _query_lrclib(artist: str, title: str, duration: int | None) -> str | None:
+async def _query_lrclib(artist: str, title: str, duration: int | None) -> dict | None:
     params = {"artist_name": artist or "", "track_name": title}
     if duration:
         params["duration"] = str(duration)
@@ -52,11 +63,11 @@ async def _query_lrclib(artist: str, title: str, duration: int | None) -> str | 
     except Exception as e:
         logger.exception("LRCLIB неизвестная ошибка: %s params=%s", e, params)
         return None
-    result = (data or {}).get("plainLyrics")
-    if not result:
-        logger.debug("LRCLIB вернул пустой текст params=%s resp=%s",
-                     params, {k: v for k, v in (data or {}).items() if k != "plainLyrics"})
-    return result or None
+    data = data or {}
+    if not data.get("plainLyrics") and not data.get("syncedLyrics"):
+        logger.debug("LRCLIB вернул пустой текст params=%s", params)
+        return None
+    return data
 
 
 async def fetch_lyrics(artist: str, title: str, duration: int | None = None) -> str | None:
@@ -84,15 +95,15 @@ async def fetch_lyrics(artist: str, title: str, duration: int | None = None) -> 
     last_result: str | None = None
     for i, (a, t) in enumerate(attempts, 1):
         logger.info("Lyrics попытка %s: artist=%r title=%r dur=%s", i, a, t, duration)
-        text = await _query_lrclib(a, t, duration)
-        if text:
-            last_result = text
+        data = await _query_lrclib(a, t, duration)
+        if data:
+            last_result = data.get("plainLyrics")
             break
         # попробуем без duration — возможно он мешает точному совпадению
         if duration:
-            text2 = await _query_lrclib(a, t, None)
-            if text2:
-                last_result = text2
+            data2 = await _query_lrclib(a, t, None)
+            if data2:
+                last_result = (data2 or {}).get("plainLyrics")
                 break
 
     if last_result:
@@ -102,3 +113,33 @@ async def fetch_lyrics(artist: str, title: str, duration: int | None = None) -> 
         logger.warning("Lyrics не найдены для %r — %r (попыток: %s)",
                        artist or "<no artist>", title, len(attempts) * (2 if duration else 1))
     return last_result
+
+
+async def fetch_lyrics_full(artist: str, title: str,
+                            duration: int | None = None) -> dict:
+    """Текст + синхронизированный LRC (если есть): {"plain", "lrc", "synced"}."""
+    if not title:
+        return {"plain": None, "lrc": None, "synced": None}
+
+    norm_title = _normalize(title)
+    norm_artist = _normalize(artist)
+
+    attempts: list[tuple[str, str]] = []
+    if norm_artist and norm_title:
+        attempts.append((norm_artist, norm_title))
+    if norm_title and (norm_title != title or not norm_artist):
+        attempts.append(("", norm_title))
+    if artist and title and (artist != norm_artist or title != norm_title):
+        attempts.append((artist.strip(), title.strip()))
+
+    for i, (a, t) in enumerate(attempts, 1):
+        logger.info("Lyrics full попытка %s: artist=%r title=%r dur=%s", i, a, t, duration)
+        for dur in (duration, None):
+            data = await _query_lrclib(a, t, dur)
+            if data:
+                plain = data.get("plainLyrics")
+                lrc = data.get("syncedLyrics")
+                return {"plain": plain or None,
+                        "lrc": lrc or None,
+                        "synced": _parse_lrc(lrc) if lrc else None}
+    return {"plain": None, "lrc": None, "synced": None}

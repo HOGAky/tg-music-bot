@@ -197,6 +197,26 @@ async def rename_playlist(session: AsyncSession, user_id: int, playlist_id: int,
     return True
 
 
+async def move_track_in_playlist(session: AsyncSession, user_id: int, playlist_id: int,
+                                 track_id: int, delta: int) -> bool:
+    """Сдвиг трека в плейлисте на delta позиций (вверх/вниз)."""
+    pl = await session.get(Playlist, playlist_id)
+    if pl is None or pl.user_id != user_id:
+        return False
+    pts = list((await session.scalars(
+        select(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(PlaylistTrack.position))).all())
+    idx = next((i for i, p in enumerate(pts) if p.track_id == track_id), None)
+    if idx is None:
+        return False
+    j = idx + delta
+    if j < 0 or j >= len(pts):
+        return False
+    pts[idx].position, pts[j].position = pts[j].position, pts[idx].position
+    await session.commit()
+    return True
+
+
 async def recent_tracks(session: AsyncSession, user_id: int, limit: int = 15) -> list[Track]:
     """Недавно прослушанные пользователем (уникальные, по свежести)."""
     stmt = (select(Track).join(TrackPlay, TrackPlay.track_id == Track.id)

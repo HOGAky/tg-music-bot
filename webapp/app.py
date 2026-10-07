@@ -14,7 +14,7 @@ from config import config
 from database import repo
 from database.models import Track
 from database.session import SessionFactory
-from services import downloader, radio, searcher
+from services import downloader, lyrics as lyrics_svc, radio, searcher
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,8 @@ def _user_id(request: web.Request) -> int:
 
 def _track_json(track) -> dict:
     return {"id": track.id, "title": track.title,
-            "artist": track.artist, "duration": track.duration}
+            "artist": track.artist, "duration": track.duration,
+            "source_url": track.source_url}
 
 
 async def library(request: web.Request) -> web.Response:
@@ -179,6 +180,58 @@ async def history_api(request: web.Request) -> web.Response:
     async with SessionFactory() as session:
         tracks = await repo.recent_tracks(session, user_id, limit=15)
     return web.json_response({"recent": [_track_json(t) for t in tracks]})
+
+
+async def chart_api(request: web.Request) -> web.Response:
+    """Глобальный топ треков бота по прослушиваниям."""
+    _user_id(request)
+    async with SessionFactory() as session:
+        top = await repo.top_tracks(session, limit=15)
+    return web.json_response({"chart": [
+        _track_json(t) | {"plays": n} for t, n in top]})
+
+
+async def artist_api(request: web.Request) -> web.Response:
+    """Треки исполнителя: поиск по имени + фильтр по совпадению артиста."""
+    _user_id(request)
+    q = (request.query.get("q") or "").strip()
+    if not q:
+        return web.json_response({"results": [], "artist": q})
+    found = await searcher.search(q, limit=20)
+    ql = q.lower()
+    picked = [f for f in found if ql in (f.artist or "").lower()][:15] or found[:10]
+    async with SessionFactory() as session:
+        tracks = [await repo.upsert_track(session, source_url=f.source_url, title=f.title,
+                                          artist=f.artist, duration=f.duration,
+                                          download_url=f.download_url) for f in picked]
+        tracks = [t for t in tracks if t is not None]
+    return web.json_response({"artist": q, "results": [_track_json(t) for t in tracks]})
+
+
+async def lyrics_api(request: web.Request) -> web.Response:
+    _user_id(request)
+    track_id = int(request.match_info["track_id"])
+    async with SessionFactory() as session:
+        track = await repo.get_track(session, track_id)
+        if track is None:
+            raise web.HTTPNotFound(text="track not found")
+        artist, title, duration = track.artist, track.title, track.duration
+    data = await lyrics_svc.fetch_lyrics_full(artist, title, duration)
+    if not data.get("plain") and not data.get("lrc"):
+        return web.json_response({"plain": None, "lrc": None, "synced": None})
+    return web.json_response(data)
+
+
+async def playlist_move(request: web.Request) -> web.Response:
+    user_id = _user_id(request)
+    pl_id = int(request.match_info["playlist_id"])
+    body = await _json_body(request)
+    track_id = int(body.get("track_id") or 0)
+    delta = int(body.get("delta") or 0)
+    async with SessionFactory() as session:
+        _own_playlist(await repo.get_playlist(session, pl_id), user_id)
+        ok = await repo.move_track_in_playlist(session, user_id, pl_id, track_id, delta)
+    return web.json_response({"ok": ok})
 
 
 async def favorites_toggle(request: web.Request) -> web.Response:
@@ -334,6 +387,10 @@ def create_app() -> web.Application:
     app.router.add_post(r"/api/playlist/{playlist_id:\d+}/delete", playlist_delete)
     app.router.add_post(r"/api/playlist/{playlist_id:\d+}/add", playlist_add)
     app.router.add_post(r"/api/playlist/{playlist_id:\d+}/remove", playlist_remove)
+    app.router.add_post(r"/api/playlist/{playlist_id:\d+}/move", playlist_move)
+    app.router.add_get("/api/chart", chart_api)
+    app.router.add_get("/api/artist", artist_api)
+    app.router.add_get(r"/api/lyrics/{track_id:\d+}", lyrics_api)
     app.router.add_get(r"/api/batch/{key:[A-Za-z0-9]+}", batch_zip)
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/app", index)
