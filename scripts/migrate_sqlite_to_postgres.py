@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select, text  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 from database.models import (  # noqa: E402
@@ -23,6 +23,9 @@ from database.models import (  # noqa: E402
 
 # порядок важен: сначала независимые таблицы, затем связи
 TABLES = [User, Track, Favorite, Playlist, PlaylistTrack, TrackPlay]
+
+# таблицы с autoincrement-pk: после вставки явных id последовательности надо сдвинуть
+SEQUENCES = ["tracks", "users", "playlists", "track_plays"]
 
 
 async def migrate(src_url: str, dst_url: str) -> None:
@@ -46,6 +49,16 @@ async def migrate(src_url: str, dst_url: str) -> None:
             total += len(rows)
 
     print(f"Итого: {total} строк")
+
+    # сдвигаем последовательности на MAX(id)+1, иначе новые INSERT получат
+    # занятые id и упадут с duplicate key на первичном ключе
+    async with dst.begin() as conn:
+        for table in SEQUENCES:
+            await conn.execute(text(
+                f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+                f"COALESCE((SELECT MAX(id) FROM {table}), 0) + 1, false)"))
+    print("Последовательности id синхронизированы")
+
     await src.dispose()
     await dst.dispose()
 
