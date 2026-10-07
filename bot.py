@@ -77,10 +77,10 @@ class RetryOnNetworkError(BaseRequestMiddleware):
     def __init__(self, attempts: int = 3) -> None:
         self._attempts = attempts
 
-    async def __call__(self, method, session, bot, request_timeout=None, *args, **kwargs):
+    async def __call__(self, make_request, bot, method):
         for attempt in range(1, self._attempts + 1):
             try:
-                return await session.make_request(bot, method, request_timeout=request_timeout)
+                return await make_request(bot, method)
             except TelegramRetryAfter as e:
                 if attempt == self._attempts:
                     raise
