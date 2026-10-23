@@ -487,6 +487,20 @@ curl https://api.telegram.org/botВАШ_ТОКЕН/getWebhookInfo
 curl http://localhost/healthz
 ```
 
+### Нет доступа к VM по SSH
+
+`scripts/ssh_port_monitor.py` — read-only диагностика с локального компьютера:
+проверяет tcp/22 и пробует зайти по ключу, ничего не меняя на сервере.
+
+```powershell
+$env:SSH_MONITOR_HOST = "84.201.167.96"
+$env:SSH_MONITOR_KEY  = "C:\путь\к\deploy_key"
+python scripts/ssh_port_monitor.py
+```
+
+Хост, ключ, пользователь и путь к `ssh.exe` переопределяются переменными
+`SSH_MONITOR_HOST` / `SSH_MONITOR_KEY` / `SSH_MONITOR_USER` / `SSH_MONITOR_EXE`.
+
 ### Ошибка 502 Bad Gateway
 
 1. Проверьте, что musicbot контейнер запущен:
