@@ -32,6 +32,8 @@ downloads/
 
 # --- Инструменты ---
 .freebuff/
+.tmp.driveupload/
+.tmp.drivedownload/
 
 # --- Редакторы/ОС ---
 .vscode/
