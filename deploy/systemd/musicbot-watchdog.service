@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart TG Music Bot if its healthcheck fails
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/tg-music-bot
+ExecStart=/usr/bin/bash /opt/tg-music-bot/scripts/restart-unhealthy.sh

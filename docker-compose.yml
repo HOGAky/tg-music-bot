@@ -1,9 +1,26 @@
 services:
   musicbot:
+    image: tg-music-bot:${MUSICBOT_IMAGE_TAG:-latest}
     build: .
     container_name: musicbot
-    restart: always
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 40s
     env_file: .env
+    environment:
+      DB_URL: postgresql+asyncpg://musicbot:${POSTGRES_PASSWORD}@postgres:5432/musicbot
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      MAX_CONCURRENT_UPDATES: ${MAX_CONCURRENT_UPDATES:-64}
+      USE_REDIS: "true"
+      REDIS_URL: redis://redis:6379/0
+      API_ENABLED: "false"
+      WEBAPP_URL: ""
+      WEBHOOK_ENABLED: ${WEBHOOK_ENABLED:-false}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      WEBHOOK_PATH: ${WEBHOOK_PATH:-/webhook}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
     extra_hosts:
       # Telegram-фильтрация режет часть DC-адресов из облака: пинним стабильный
       - "api.telegram.org:149.154.167.220"
@@ -21,15 +38,24 @@ services:
       - internal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 1536M
+        reservations:
+          cpus: '0.50'
+          memory: 512M
 
   postgres:
     image: postgres:16-alpine
     container_name: musicbot-postgres
-    restart: always
+    restart: unless-stopped
+    stop_grace_period: 60s
     environment:
       POSTGRES_USER: musicbot
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
@@ -43,11 +69,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 2048M
+        reservations:
+          cpus: '0.25'
+          memory: 512M
 
   nginx:
+    image: tg-music-bot-nginx:${MUSICBOT_IMAGE_TAG:-latest}
     build: ./nginx
     container_name: musicbot-nginx
-    restart: always
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
@@ -63,21 +99,44 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 128M
+        reservations:
+          cpus: '0.10'
+          memory: 64M
 
   redis:
     image: redis:alpine
     container_name: musicbot-redis
-    restart: always
-    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly", "yes",
+        "--maxmemory", "384mb",
+        "--maxmemory-policy", "noeviction"
+      ]
     volumes:
       - redis_data:/data
     networks:
       - internal
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          cpus: '0.10'
+          memory: 128M
 
 networks:
   internal:

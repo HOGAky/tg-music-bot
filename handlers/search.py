@@ -54,25 +54,26 @@ async def on_text(message: Message):
     async with SessionFactory() as session:
         await repo.get_or_create_user(session, user_id, message.from_user.username)
 
-        if searcher.is_url(text):
-            status = await message.answer("🔗 Обрабатываю ссылку...")
-            found = await searcher.resolve_url(text)
-        else:
-            status = await message.answer("🔎 Ищу...")
-            found = await searcher.search(text)
+    if searcher.is_url(text):
+        status = await message.answer("🔗 Обрабатываю ссылку...")
+        found = await searcher.resolve_url(text)
+    else:
+        status = await message.answer("🔎 Ищу...")
+        found = await searcher.search(text)
 
-        if not found:
-            try:
-                await status.delete()
-            except Exception as e:
-                logger.debug("Не удалось удалить статус-сообщение: %s", e)
-            await message.answer(
-                f"Ничего не нашёл по запросу <i>{text[:200]}</i> 😔\n"
-                "Поддерживаю: Spotify, Яндекс Музыку, YouTube, SoundCloud, Bandcamp и "
-                "поиск по названию. Попробуй изменить запрос."
-            )
-            return
+    if not found:
+        try:
+            await status.delete()
+        except Exception as e:
+            logger.debug("Не удалось удалить статус-сообщение: %s", e)
+        await message.answer(
+            f"Ничего не нашёл по запросу <i>{text[:200]}</i> 😔\n"
+            "Поддерживаю: Spotify, Яндекс Музыку, YouTube, SoundCloud, Bandcamp и "
+            "поиск по названию. Попробуй изменить запрос."
+        )
+        return
 
+    async with SessionFactory() as session:
         try:
             tracks = [
                 await repo.upsert_track(
@@ -81,9 +82,9 @@ async def on_text(message: Message):
                 for f in found
             ]
             tracks = [t for t in tracks if t is not None]
-        except Exception as e:
+        except Exception:
             # не оставляем пользователя с молчаливым «Ищу...» при любой ошибке БД
-            logger.exception("Не удалось сохранить результаты по %r: %s", text, e)
+            logger.exception("Не удалось сохранить результаты по %r", text)
             await message.answer("⚠️ Нашёл треки, но не смог их сохранить. Попробуй ещё раз через минуту.")
             return
         try:
@@ -205,8 +206,8 @@ async def cb_download_all(callback: CallbackQuery, callback_data: DlAllCB):
                     continue
                 try:  # имя трека в прогресс до (возможно долгого) скачивания
                     await progress.edit_text(f"⬇️ [{i}/{total}] {short(track.title, 40)}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Не удалось обновить прогресс-сообщение: %s", e)
                 in_fav = await repo.is_favorite(session, callback.from_user.id, track.id)
                 ok = await sender.send_track(
                     msg, session, track,
@@ -232,8 +233,8 @@ async def cb_download_all(callback: CallbackQuery, callback_data: DlAllCB):
     try:
         await progress.edit_text(f"{tail}: {result}.{note}",
                                  reply_markup=None)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Не удалось обновить итог прогресса: %s", e)
 
 
 @router.callback_query(DlStopCB.filter())
@@ -281,15 +282,15 @@ async def _run_parts_batch(msg: Message, progress: Message, batch: dict,
         size_mb = (await asyncio.to_thread(_make_zip, zip_path, staging)) // (1024 * 1024)
         try:
             await progress.edit_text(f"📦 Часть {parts} ({count} треков, ~{size_mb} МБ) — отправляю…")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Не удалось показать прогресс отправки части: %s", e)
         try:
             await msg.answer_document(
                 FSInputFile(zip_path),
                 caption=f"📦 Часть {parts} — {count} треков",
                 protect_content=protect)
-        except Exception as e:
-            logger.exception("Не удалось отправить архив части %s: %s", parts, e)
+        except Exception:
+            logger.exception("Не удалось отправить архив части %s", parts)
         for path, _ in staging:
             try:
                 os.remove(path)
@@ -316,8 +317,8 @@ async def _run_parts_batch(msg: Message, progress: Message, batch: dict,
             continue
         try:
             await progress.edit_text(f"⬇️ [{i}/{total}] {short(track.title, 40)}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Не удалось обновить прогресс zip-сборки: %s", e)
         try:
             result = await downloader.download(url, quality=quality, cache_key=track.s3_key)
         except Exception as e:
@@ -413,7 +414,9 @@ async def _run_full_zip_batch(msg: Message, progress: Message, batch: dict, key:
                 failed += 1
                 return
             try:
-                os.remove(dl.path)
+                if dl.local_disposable:
+                    # копия уже в S3 — локальный файл одноразовый
+                    os.remove(dl.path)
             except OSError:
                 pass
         done += 1
@@ -422,8 +425,8 @@ async def _run_full_zip_batch(msg: Message, progress: Message, batch: dict, key:
             last_edit = now
             try:
                 await progress.edit_text(f"⬇️ скачано {done}/{total}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Не удалось обновить счётчик скачивания: %s", e)
 
     await asyncio.gather(*(asyncio.create_task(one(i, t)) for i, t in items))
     await asyncio.to_thread(zf.close)
@@ -438,8 +441,8 @@ async def _run_full_zip_batch(msg: Message, progress: Message, batch: dict, key:
                 caption=f"📦 Плейлист — {sent} треков",
                 protect_content=protect)
             shutil.rmtree(tmp, ignore_errors=True)
-        except Exception as e:
-            logger.exception("Не удалось отправить zip-архив: %s", e)
+        except Exception:
+            logger.exception("Не удалось отправить zip-архив")
             await msg.answer("⚠️ Архив собран, но Telegram не принял файл.")
         return sent, failed
 

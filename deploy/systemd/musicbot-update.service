@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for TG Music Bot updates
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/tg-music-bot
+ExecStart=/usr/bin/bash /opt/tg-music-bot/scripts/update.sh

@@ -1,10 +1,11 @@
 import asyncio
 import json
 import logging
-import os
 import re
 import ssl
 import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import aiohttp
@@ -33,6 +34,11 @@ MAX_COLLECTION_TRACKS = 5000
 
 _ytm: YTMusic | None = None
 _ytm_lock = threading.Lock()
+_SEARCH_CACHE_TTL = 300
+_SEARCH_CACHE_MAX_SIZE = 512
+_search_cache: OrderedDict[
+    tuple[str, int], tuple[float, list["FoundTrack"]]
+] = OrderedDict()
 
 
 def ytmusic() -> YTMusic:
@@ -102,9 +108,9 @@ def _ytm_search_sync(query: str, limit: int) -> list[FoundTrack]:
         if need <= 0:
             break
         try:
-            results = ytm.search(query, filter=filter_val, limit=max(need, limit)) or []
-        except Exception as e:
-            logger.exception("YTMusic search failed (query=%r, filter=%s): %s", query, filter_val, e)
+            results = ytm.search(query, filter=filter_val, limit=need) or []
+        except Exception:
+            logger.exception("YTMusic search failed (query=%r, filter=%s)", query, filter_val)
             continue
         out.extend(_parse_ytm_results(results, seen))
     if not out:
@@ -117,10 +123,30 @@ def _ytm_search_sync(query: str, limit: int) -> list[FoundTrack]:
 async def search(query: str, limit: int = 8) -> list[FoundTrack]:
     """Поиск с ретраями: часть соединений из облака рвётся по SSL —
     повторная попытка обычно проходит."""
+    cache_key = (" ".join(query.casefold().split()), limit)
+    cached = _search_cache.get(cache_key)
+    now = time.monotonic()
+    if cached is not None:
+        expires_at, tracks = cached
+        if expires_at > now:
+            _search_cache.move_to_end(cache_key)
+            logger.debug("YTMusic cache hit for query=%r", query)
+            return list(tracks)
+        del _search_cache[cache_key]
+
     last_exc: Exception | None = None
     for attempt in range(1, 4):
         try:
-            return await asyncio.to_thread(_ytm_search_sync, query, limit)
+            tracks = await asyncio.to_thread(_ytm_search_sync, query, limit)
+            if tracks:
+                _search_cache[cache_key] = (
+                    time.monotonic() + _SEARCH_CACHE_TTL,
+                    tracks,
+                )
+                _search_cache.move_to_end(cache_key)
+                while len(_search_cache) > _SEARCH_CACHE_MAX_SIZE:
+                    _search_cache.popitem(last=False)
+            return tracks
         except Exception as e:
             last_exc = e
             logger.warning("Поиск %r: попытка %s не удалась: %s", query, attempt, e)
@@ -132,8 +158,6 @@ async def search(query: str, limit: int = 8) -> list[FoundTrack]:
 # ---------- метаданные для "прочих" ссылок через yt-dlp ----------
 def _probe_sync(url: str) -> FoundTrack:
     opts = {"quiet": True, "no_warnings": True, "noplaylist": True}
-    if os.path.exists("cookies.txt"):
-        opts["cookiefile"] = "cookies.txt"
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -422,10 +446,12 @@ async def _spotify_via_embed(kind: str, sid: str) -> list[FoundTrack]:
 
     async def fetch(ssl_ctx) -> str:
         timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as http:
-            async with http.get(embed_url, ssl=ssl_ctx) as r:
-                r.raise_for_status()
-                return await r.text(errors="replace")
+        async with (
+            aiohttp.ClientSession(timeout=timeout, headers=headers) as http,
+            http.get(embed_url, ssl=ssl_ctx) as r,
+        ):
+            r.raise_for_status()
+            return await r.text(errors="replace")
 
     try:
         html = await fetch(ctx)
@@ -510,8 +536,8 @@ async def resolve_url(url: str) -> list[FoundTrack]:
     if "music.yandex" in url:
         try:
             return await asyncio.to_thread(_yandex_sync, url)
-        except Exception as e:
-            logger.exception("Яндекс Музыка не смогла обработать %s: %s", url, e)
+        except Exception:
+            logger.exception("Яндекс Музыка не смогла обработать %s", url)
             return []
     # YouTube / YouTube Music / SoundCloud / Bandcamp / ... — всё, что умеет yt-dlp
     return [await asyncio.to_thread(_probe_sync, url)]

@@ -1,0 +1,9 @@
+[Unit]
+Description=Back up TG Music Bot PostgreSQL database
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/tg-music-bot
+ExecStart=/usr/bin/bash /opt/tg-music-bot/scripts/backup-postgres.sh

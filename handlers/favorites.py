@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -9,6 +11,7 @@ from database.session import SessionFactory
 from utils import msg_of
 
 router = Router(name="favorites")
+logger = logging.getLogger(__name__)
 
 
 @router.message(Command("fav", "favorites"))
@@ -32,6 +35,6 @@ async def cb_fav_del(callback: CallbackQuery, callback_data: FavDelCB):
     if msg is not None:
         try:
             await msg.edit_reply_markup(reply_markup=keyboards.favorites_kb(tracks))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Не удалось обновить разметку избранного: %s", e)
     await callback.answer("Убрано из избранного")

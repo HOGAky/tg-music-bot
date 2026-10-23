@@ -34,13 +34,20 @@ Telegram-бот для поиска, скачивания и прослушив�
 - ⚙️ /settings — качество 128/192/320 kbps, защита контента от пересылки
 - 🏆 /top — глобальный и личный топ треков
 
+### 🛡️ Продакшен и эксплуатация
+- Docker Compose с PostgreSQL и Redis для состояния FSM
+- Webhook-обработка с ограничением параллельных обновлений и healthcheck зависимостей
+- Отдельный Telegram-бот получает WARNING/ERROR логи и уведомления о сбоях/восстановлении
+- Мониторинг запускается параллельно основному боту из `bot.py`
+- systemd для запуска при перезагрузке, проверок обновлений и ежедневных резервных копий
+
 ### 📱 Mini App (веб-плеер)
 - Включается через `API_ENABLED=true`; при заданном `WEBAPP_URL` бот ставит кнопку меню
 - Избранное и плейлисты, стриминг mp3, тема под Telegram
 - Авторизация по подписи Telegram WebApp initData
-- /healthz — healthcheck для мониторинга
+- В production Docker Compose Mini App выключена; `/healthz` работает отдельно
 
-Пока не реализовано: голосовой поиск, ID3-теги/обложки, sleep-timer, поиск внутри Mini App, скрипты автоматизации 24/7.
+Пока не реализовано: голосовой поиск, ID3-теги/обложки, sleep-timer, поиск внутри Mini App.
 
 ---
 
@@ -166,14 +173,37 @@ API принимает только запросы с корректной по�
 | API_PORT | int | 8080 | Порт веб-плеера |
 | WEBAPP_URL | str | "" | Публичный HTTPS-адрес плеера (<host>/app/) |
 | DB_URL | str | sqlite+aiosqlite:///data/musicbot.db | SQLAlchemy-строка подключения (PostgreSQL: `postgresql+asyncpg://…`) |
+| POSTGRES_PASSWORD | str | — | Пароль PostgreSQL в Docker Compose; сгенерируйте случайную hex-строку |
+| DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT | int | 20 / 10 / 30 | Параметры пула PostgreSQL |
 | CACHE_DIR | str | downloads | Кэш mp3 |
 | MAX_CONCURRENT_DOWNLOADS | int | 4 | Лимит параллельных yt-dlp |
+| MAX_CONCURRENT_UPDATES | int | 64 | Максимум одновременно обрабатываемых Telegram-обновлений |
 | WEBHOOK_ENABLED | bool | false | Webhook вместо polling (продакшен за nginx) |
 | WEBHOOK_URL / WEBHOOK_PATH / WEBHOOK_SECRET | str | "" | Адрес, путь и секрет webhook |
+| MONITOR_BOT_TOKEN / MONITOR_CHAT_ID | str | "" | Токен отдельного бота и (необязательно) ID разрешённого чата для логов и сообщений о сбоях |
+| MONITOR_INTERVAL_SECONDS | int | 30 | Частота проверки health endpoint монитором в `bot.py` |
 | LOG_LEVEL / LOG_FORMAT | str | INFO / text | Уровень и формат логов (json для облака) |
 | USE_S3_STORAGE | bool | false | Кэш mp3 в Yandex Object Storage; при недоступности S3 — локальный кэш |
 | S3_ENDPOINT_URL / S3_BUCKET_NAME / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY / S3_REGION / S3_CACHE_PREFIX | str | — | Настройки S3 (см. `.env.example`) |
-| USE_REDIS / REDIS_URL | bool/str | false / "" | Redis для FSM (мультиинстансность); fallback — память |
+| USE_REDIS / REDIS_URL | bool/str | false / "" | Redis для FSM; в Docker Compose включён и обязателен |
+
+Если задан `MONITOR_BOT_TOKEN`, `python bot.py` запускает обоих ботов: основной
+работает как прежде, а отдельный бот уведомлений параллельно запускает polling и
+пересылку логов. Отправьте ему `/start`; команда `/status` проверяет состояние
+основного бота. Для ограничения доступа заранее укажите свой ID в
+`MONITOR_CHAT_ID`. Если ID не задан, монитор-бот подключит чат, который первым
+отправит ему `/start`; подключённый чат хранится только до перезапуска процесса.
+Пересылаются `WARNING` и `ERROR`, а `INFO`/`DEBUG` остаются в локальных логах.
+
+Если основной источник не отдаёт аудио, бот пробует SoundCloud только для
+треков, у которых автор явно разрешил скачивание. Результаты YouTube Music
+остаются основными для поиска; если загрузка не проходит, SoundCloud ищет
+доступную версию по названию и исполнителю. Доступность конкретной песни зависит
+от каталога SoundCloud.
+
+Инструкции для Linux-хоста, systemd, автоматических обновлений и резервных копий —
+в [DEPLOY.md](./DEPLOY.md). Один хост остаётся единой точкой отказа; указанная там
+ресурсная конфигурация является стартовой и не заменяет нагрузочное тестирование.
 
 ---
 
@@ -219,8 +249,8 @@ pytest
 - [ ] Голосовой поиск и Shazam-режим (AcoustID + chromaprint)
 - [ ] Telegram Stars premium-тир (приоритетная очередь, 320 по умолчанию)
 - [ ] Совместные плейлисты (deep-link инвайты)
-- [ ] Redis для FSM + кэш поиска (мультиинстанс)
-- [ ] PostgreSQL + Alembic миграции
+- [x] Redis для FSM в production Docker Compose
+- [x] PostgreSQL для production Docker Compose
 - [ ] Apple Music-ссылки (iTunes Lookup API)
 - [ ] Автопостинг «трек дня» в канал
 - [ ] Web Player 2.0: поиск в Mini App, редактирование плейлистов

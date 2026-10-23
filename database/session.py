@@ -19,7 +19,13 @@ def _prepare_db_url(url: str) -> str:
 
 _engine_kwargs: dict = {"echo": False}
 if _prepare_db_url(config.DB_URL).startswith("postgresql"):
-    _engine_kwargs["pool_pre_ping"] = True  # у облаков длинные соединения иногда рвутся
+    _engine_kwargs.update(
+        pool_pre_ping=True,
+        pool_size=config.DB_POOL_SIZE,
+        max_overflow=config.DB_MAX_OVERFLOW,
+        pool_timeout=config.DB_POOL_TIMEOUT,
+    )
+# SQLite (в т.ч. тестовое окружение) работает без пула — параметры неприменимы
 
 engine = create_async_engine(_prepare_db_url(config.DB_URL), **_engine_kwargs)
 SessionFactory = async_sessionmaker(engine, expire_on_commit=False)

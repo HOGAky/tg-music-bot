@@ -48,7 +48,10 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
                      user_id: int | None = None, queue_name: str = "",
                      position: int = 0, queue_size: int = 0,
                      status: Message | None = None, quiet: bool = False) -> bool:
-    """Отправка трека: сначала пробуем кеш file_id, иначе качаем. После — чистим диск.
+    """Отправка трека: сначала пробуем кеш file_id, иначе качаем.
+
+    Локальный mp3 удаляется сразу после отправки, только если его копия
+    сохранена в S3 (result.local_disposable) — иначе файл остаётся как кэш.
 
     status — готовое сообщение-статус (для пакетной отправки): тогда не создаём
     и не удаляем своё, текстом управляет вызывающий код.
@@ -56,6 +59,8 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
     user = await repo.get_user(session, user_id) if user_id is not None else None
     protect = bool(user.protect_content) if user is not None else False
     quality = user.quality if user is not None else 192
+    if user_id is not None:
+        await session.commit()
 
     # 1) мгновенная отправка из кеша Telegram
     if track.file_id:
@@ -81,45 +86,39 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
         if not quiet:
             await msg.answer("Не удалось найти источник для этого трека 😔")
         return False
+    await session.commit()
 
     own_status = status is None
     if own_status:
         status = await msg.answer("⏳ Скачиваю трек...")
     try:
         result = await downloader.download(url, quality=quality, cache_key=track.s3_key)
-    except Exception as e:
+    except Exception:
         logger.exception("Ошибка скачивания url=%s track=%s (%s)", url, track.id, track.title)
-        if "Sign in to confirm" in str(e):
-            # age-restricted: качаем тот же трек с SoundCloud (без возрастных ограничений)
-            try:
-                result = await downloader.download_soundcloud_fallback(
-                    track,
-                    quality,
-                    cache_key=track.s3_key,
-                )
-                logger.info("track=%s скачан с SoundCloud: %s", track.id, result.title)
-            except Exception as e2:  # noqa: BLE001
-                logger.warning("SoundCloud fallback не сработал track=%s: %s", track.id, e2)
-                if not quiet:
-                    try:
-                        await status.edit_text(
-                            "🔒 Трек скрыт возрастным ограничением YouTube, а на SoundCloud "
-                            "его не нашлось. Попробуй другой вариант из поиска.")
-                    except TelegramAPIError as edit_error:
-                        logger.debug("Не удалось обновить статус для age-restricted track=%s: %s",
-                                     track.id, edit_error)
-                return False
-        else:
+        try:
+            result = await downloader.download_soundcloud_fallback(
+                track,
+                quality,
+            )
+        except Exception as fallback_error:
+            logger.warning(
+                "No alternative source for track=%s: %s",
+                track.id,
+                fallback_error,
+            )
             if not quiet:
-                if "Private video" in str(e) or "unavailable" in str(e).lower():
-                    reason = "🔒 Видео недоступно или приватное. Попробуй другой вариант из поиска."
-                else:
-                    reason = "⚠️ Не удалось скачать трек. Попробуй другой вариант из поиска."
                 try:
-                    await status.edit_text(reason)
+                    await status.edit_text(
+                        "⚠️ Не удалось получить аудио из основного источника "
+                        "и не нашлось подходящей загрузки в SoundCloud. "
+                        "Попробуй другой вариант."
+                    )
                 except TelegramAPIError as edit_error:
-                    logger.debug("Не удалось обновить статус при ошибке скачивания track=%s: %s",
-                                 track.id, edit_error)
+                    logger.debug(
+                        "Не удалось обновить статус при ошибке скачивания track=%s: %s",
+                        track.id,
+                        edit_error,
+                    )
             return False
 
     if storage.enabled and result.cache_key and track.s3_key != result.cache_key:
@@ -136,14 +135,14 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
                              track.id, edit_error)
         return False
 
-    kwargs = dict(
-        audio=FSInputFile(result.path),
-        title=track.title[:64],
-        performer=(track.artist or "Unknown")[:64],
-        duration=_dur(track.duration, result.duration),
-        reply_markup=reply_markup,
-        protect_content=protect,
-    )
+    kwargs = {
+        "audio": FSInputFile(result.path),
+        "title": track.title[:64],
+        "performer": (track.artist or "Unknown")[:64],
+        "duration": _dur(track.duration, result.duration),
+        "reply_markup": reply_markup,
+        "protect_content": protect,
+    }
     audio_msg = None
     try:
         audio_msg = await msg.answer_audio(
@@ -169,7 +168,11 @@ async def send_track(msg: Message, session, track: Track, reply_markup=None, *,
             await status.delete()
         except TelegramAPIError as del_e:
             logger.debug("Не удалось удалить статус-сообщение: %s", del_e)
-    _cleanup(result.path, result.thumbnail)
+    _cleanup(result.thumbnail)  # обложка нужна только на момент отправки
+    if result.local_disposable:
+        # копия mp3 сохранена в S3 — локальный файл одноразовый,
+        # удаляем его сразу после завершения отправки пользователю
+        _cleanup(result.path)
 
     if audio_msg is None:
         return False

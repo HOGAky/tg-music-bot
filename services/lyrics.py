@@ -59,8 +59,8 @@ async def _query_lrclib(artist: str, title: str, duration: int | None) -> dict |
     except aiohttp.ClientError as e:
         logger.warning("LRCLIB недоступен: %s params=%s", e, params)
         return None
-    except Exception as e:
-        logger.exception("LRCLIB неизвестная ошибка: %s params=%s", e, params)
+    except Exception:
+        logger.exception("LRCLIB неизвестная ошибка params=%s", params)
         return None
     data = data or {}
     if not data.get("plainLyrics") and not data.get("syncedLyrics"):

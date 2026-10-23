@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for TG Music Bot updates every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=musicbot-update.service
+
+[Install]
+WantedBy=timers.target

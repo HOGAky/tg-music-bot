@@ -1,0 +1,11 @@
+[Unit]
+Description=Check TG Music Bot health every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=musicbot-watchdog.service
+
+[Install]
+WantedBy=timers.target

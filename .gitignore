@@ -22,6 +22,16 @@ data/
 *.log.*
 backups/
 downloads/
+.deploy-current
+.deploy-failed
+.deploy-env
+.deploy-env.*
+.deploy.lock
+.health-watchdog.lock
+.backup.lock
+
+# --- Инструменты ---
+.freebuff/
 
 # --- Редакторы/ОС ---
 .vscode/

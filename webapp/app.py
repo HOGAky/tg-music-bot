@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -14,6 +15,7 @@ from config import config
 from database import repo
 from database.models import Track
 from database.session import SessionFactory
+from health import healthz
 from services import downloader, radio, searcher
 from services import lyrics as lyrics_svc
 from services.storage import storage
@@ -26,6 +28,18 @@ INIT_DATA_TTL = 24 * 3600
 # ---------- отдача zip-архивов больших плейлистов ----------
 BATCH_ZIP_TTL = 24 * 3600
 _batch_zips: dict[str, dict] = {}  # key -> {"path", "name", "ts"}
+_CACHE_PRUNE_INTERVAL = 3600
+_cache_pruned_at = time.monotonic()
+_cache_prune_lock = asyncio.Lock()
+
+
+async def _prune_cache_if_due() -> None:
+    global _cache_pruned_at
+    async with _cache_prune_lock:
+        if time.monotonic() - _cache_pruned_at < _CACHE_PRUNE_INTERVAL:
+            return
+        await asyncio.to_thread(downloader.prune_cache)
+        _cache_pruned_at = time.monotonic()
 
 
 def _check_init_data(init_data: str) -> int | None:
@@ -98,6 +112,7 @@ async def _prepare_track(session, track: Track, quality: int) -> str:
 
 
 async def stream(request: web.Request) -> web.StreamResponse:
+    """Стриминг трека с поддержкой Range-запросов (HTTP 206) для iOS/Android seek."""
     user_id = _user_id(request)
     track_id = int(request.match_info["track_id"])
     async with SessionFactory() as session:
@@ -113,8 +128,72 @@ async def stream(request: web.Request) -> web.StreamResponse:
         logger.exception("Не удалось подготовить трек %s для плеера", track_id)
         raise web.HTTPBadGateway(text="download failed")
 
-    downloader.prune_cache()
-    return web.FileResponse(path, headers={"Content-Type": "audio/mpeg"})
+    await _prune_cache_if_due()
+
+    file_size = os.path.getsize(path)
+    range_header = request.headers.get("Range")
+
+    if not range_header:
+        # Full file response
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Type": "audio/mpeg",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+            },
+        )
+
+    # Parse Range header: "bytes=start-end" or "bytes=start-"
+    try:
+        range_match = range_header.strip().lower()
+        if not range_match.startswith("bytes="):
+            raise ValueError("Invalid range unit")
+        range_spec = range_match[6:]  # remove "bytes="
+        start_str, end_str = range_spec.split("-", 1)
+        start = int(start_str) if start_str else 0
+        end = int(end_str) if end_str else file_size - 1
+    except (ValueError, IndexError):
+        raise web.HTTPBadRequest(text="Invalid Range header")
+
+    # Validate range
+    if start >= file_size or end >= file_size or start > end:
+        raise web.HTTPRangeNotSatisfiable(
+            headers={"Content-Range": f"bytes */{file_size}"}
+        )
+
+    content_length = end - start + 1
+
+    async def file_sender():
+        """Async generator yielding file chunks."""
+        CHUNK_SIZE = 64 * 1024  # 64KB chunks
+        file = await asyncio.to_thread(open, path, "rb")
+        try:
+            await asyncio.to_thread(file.seek, start)
+            remaining = content_length
+            while remaining > 0:
+                chunk = await asyncio.to_thread(
+                    file.read,
+                    min(CHUNK_SIZE, remaining),
+                )
+                if not chunk:
+                    break
+                yield chunk
+                remaining -= len(chunk)
+        finally:
+            await asyncio.to_thread(file.close)
+
+    return web.Response(
+        status=206,
+        body=file_sender(),
+        headers={
+            "Content-Type": "audio/mpeg",
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(content_length),
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 
 async def _json_body(request: web.Request) -> dict:
@@ -317,10 +396,6 @@ async def playlist_remove(request: web.Request) -> web.Response:
         _own_playlist(await repo.get_playlist(session, pl_id), user_id)
         await repo.remove_track_from_playlist(session, pl_id, track_id)
     return web.json_response({"ok": True})
-
-
-async def healthz(_: web.Request) -> web.Response:
-    return web.json_response({"status": "ok"})
 
 
 def _batch_sig(key: str) -> str:

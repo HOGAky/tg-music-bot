@@ -2,6 +2,54 @@
 
 Все изменения проекта для деплоя на Yandex Cloud.
 
+## [v1.2.0] - 2026-10-13
+
+### Этап 1 — Автоочистка кэша (30 дней) и S3 multi-storage fallback
+
+#### Конфигурация
+- `CACHE_MAX_AGE_DAYS` (30) и `CACHE_MAX_SIZE_BYTES` (LRU-порог 1.5 ГБ) в `config.py`/`.env`
+- Настройки вторичного S3-бакета: `S3_SECONDARY_ENDPOINT_URL/BUCKET_NAME/ACCESS_KEY_ID/SECRET_ACCESS_KEY`
+
+#### Хранилище (`services/storage.py`)
+- `setup_lifecycle_policy()` — вызывается при старте, ставит Lifecycle Rule с Expiration = 30 дней
+  на префикс `musicbot/` (правило мержится с чужими правилами бакета)
+- `upload_file()/download_file()/file_exists()/delete_file()` при сбоях связи/5xx
+  автоматически переключаются Primary → Secondary; при недоступности обоих S3 —
+  None/False + запись в лог (Graceful Fallback на локальный диск)
+
+#### Загрузчик (`services/downloader.py`)
+- `prune_cache()`: сначала безусловно удаляет mp3 старше `CACHE_MAX_AGE_DAYS` (по mtime),
+  затем LRU-чистка по `CACHE_MAX_SIZE_BYTES`
+- `DownloadResult.local_disposable`: после успешного push в S3 локальный mp3 удаляется
+  сразу после отправки пользователю; если push не удался — файл остаётся локальным кэшем
+
+### Этап 2 — PostgreSQL + Alembic
+- `database/session.py`: для postgres(ql):// — asyncpg, `pool_pre_ping=True, pool_size=20, max_overflow=10`
+- Alembic: `alembic.ini`, async `alembic/env.py` (URL из окружения/.env, без хардкода),
+  начальная миграция `0001` (users, tracks, playlists, playlist_tracks, track_plays, favorites + индексы)
+- `scripts/migrate_sqlite_to_postgres.py`: идемпотентный перенос (merge по первичному ключу)
+  с коррекцией последовательностей `setval(COALESCE(MAX(id)+1))`
+
+### Этап 3 — Redis FSM, network resilience, healthchecks
+- `bot.py`:
+  - `RetryOnNetworkError`: до 5 попыток с экспоненциальной задержкой (0.5с → 30с),
+    покрывает обрывы/TLS/`TelegramNetworkError`/`aiohttp.ClientError`/OSError
+  - Graceful shutdown по SIGINT/SIGTERM: `delete_webhook()` → остановка HTTP-сервера →
+    закрытие Redis → `engine.dispose()` (каждый шаг независим от сбоев остальных)
+  - `/healthz` доступен во всех режимах (webhook-only и polling без веб-плеера) —
+    docker healthcheck всегда проходит
+- `nginx`: таймауты `proxy_connect/send/read`, `proxy_http_version 1.1`, `proxy_next_upstream`,
+  `proxy_buffering off` для стриминга веб-плеера; rate limit и X-Forwarded-For сохранены
+- `nginx/Dockerfile`: установлен `curl` (healthcheck из docker-compose)
+
+### Линтер
+- `ruff.toml`: политика Graceful Degradation (BLE001 отключён, E722/S110 остаются)
+- Исправлены 24 предсуществующие ошибки: TRY401, S110, SIM115/SIM117, C408, DTZ005,
+  UP009/UP041, PLW1510; удалены устаревшие `noqa: BLE001`
+- `ruff check .` — All checks passed
+
+---
+
 ## [v1.1.0] - 2025-10-06
 
 ### Добавлено (Deployment)

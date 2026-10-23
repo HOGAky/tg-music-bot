@@ -1,5 +1,7 @@
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -36,6 +38,14 @@ logs/
 data/
 downloads/
 cache/
+*.db
+*.db-journal
+*.db-*
+backups/
+.freebuff/
+.tmp.driveupload/
+.deploy/
+.deploy.*
 
 # Git
 .git/
@@ -53,6 +63,7 @@ run.bat
 
 # Ruff cache
 .ruff_cache/
+tests/
 
 # Docker files (except root)
 nginx/ssl/

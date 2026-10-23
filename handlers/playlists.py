@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
@@ -24,6 +25,7 @@ from services import searcher, sender
 from utils import msg_of, safe_edit
 
 router = Router(name="playlists")
+logger = logging.getLogger(__name__)
 
 
 class PlaylistStates(StatesGroup):
@@ -180,8 +182,8 @@ async def cb_pl_del(callback: CallbackQuery, callback_data: PlDelCB):
     if deleted and msg:
         try:
             await msg.delete()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Не удалось удалить сообщение плейлиста: %s", e)
 
 
 @router.callback_query(PlDelTrackCB.filter())
@@ -231,5 +233,5 @@ async def cb_play_all(callback: CallbackQuery, callback_data: PlayAllCB):
             await asyncio.sleep(1.0)  # защита от rate limit Telegram
     try:
         await status.delete()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Не удалось удалить статус воспроизведения плейлиста: %s", e)
