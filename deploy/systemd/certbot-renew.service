@@ -1,0 +1,16 @@
+[Unit]
+Description=Certbot certificate renewal for tg-music-bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/tg-music-bot
+# Certbot renews certs that are within 30 days of expiry
+# --deploy-hook reloads nginx after successful renewal
+ExecStart=/usr/bin/docker run --rm \
+  -v /opt/tg-music-bot/nginx/ssl:/etc/letsencrypt \
+  -v /opt/tg-music-bot/certbot/www:/var/www/certbot \
+  certbot/certbot:v2.11.0 renew \
+  --webroot -w /var/www/certbot \
+  --deploy-hook "docker exec musicbot-nginx nginx -s reload"

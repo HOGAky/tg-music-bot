@@ -305,14 +305,26 @@ sudo install -m 0644 deploy/systemd/musicbot-backup.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/musicbot-backup.timer /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/musicbot-watchdog.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/musicbot-watchdog.timer /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/certbot-renew.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/certbot-renew.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now tg-music-bot.service
-sudo systemctl enable --now musicbot-update.timer musicbot-backup.timer musicbot-watchdog.timer
+sudo systemctl enable --now musicbot-update.timer musicbot-backup.timer musicbot-watchdog.timer certbot-renew.timer
+```
+
+Ротация логов Docker: скопируйте `deploy/daemon.json` в `/etc/docker/daemon.json`
+и перезапустите Docker — иначе json-file логи контейнеров растут без ограничений.
+
+```bash
+sudo install -m 0644 deploy/daemon.json /etc/docker/daemon.json
+sudo systemctl restart docker
 ```
 
 - Docker перезапускает контейнеры после аварийного завершения и старта Docker после перезагрузки хоста.
 - Watchdog проверяет Docker healthcheck раз в минуту и перезапускает контейнер бота,
   если он признан нездоровым.
+- `certbot-renew.timer` раз в сутки запускает `certbot renew --webroot`; при успешном
+  продлении deploy-hook перезагружает nginx, простой не требуется.
 - Сервис обновлений проверяет `origin/main` каждые 5 минут, собирает новую версию и
   проверяет `/healthz`. Если новая версия не проходит проверку, предыдущий образ
   восстанавливается; проблемный commit автоматически повторно не разворачивается.

@@ -56,7 +56,8 @@ Telegram-бот для поиска, скачивания и прослушив�
 tg-music-bot/
 ├── bot.py                  # Entrypoint: Bot+Dispatcher, запуск Mini App
 ├── config.py               # pydantic-settings Config
-├── texts.py                # RU-шаблоны сообщений
+├── health.py               # /healthz для healthcheck и монитора
+├── monitor.py              # алерты и пересылка WARNING/ERROR в отдельный бот
 ├── utils.py                # helpers: short(), pack_query, msg_of, safe_edit
 ├── callbacks.py            # aiogram CallbackData classes
 ├── keyboards.py            # inline-клавиатуры
