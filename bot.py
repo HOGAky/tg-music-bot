@@ -385,7 +385,7 @@ async def main() -> None:
 
     runner = None
     if config.API_ENABLED:
-        runner = await start_webapp()
+        runner = await start_webapp(bot=bot)
         logger.info("WebApp HTTP-сервер включён: %s:%s", config.API_HOST, config.API_PORT)
     elif not config.WEBHOOK_ENABLED:
         # polling без веб-плеера: иначе healthcheck docker-контейнера не пройдёт

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import aiohttp
 from aiogram import Bot, Dispatcher, Router
@@ -172,7 +172,7 @@ async def _run_log_forwarder(
         else:
             try:
                 first_message = await asyncio.wait_for(log_queue.get(), timeout=2)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 first_message = ""
 
         messages = [first_message] if first_message else []
@@ -233,7 +233,7 @@ async def _run_health_monitor(
             message = (
                 f"MusicBot: сервис {state}.\n"
                 f"Проверка: {detail}\n"
-                f"Время UTC: {datetime.now(timezone.utc).isoformat(timespec='seconds')}"
+                f"Время UTC: {datetime.now(UTC).isoformat(timespec='seconds')}"
             )
             if await _send_notification(session, token, chat_id, message):
                 notified_state = healthy
@@ -253,7 +253,7 @@ async def _check_health(
             if not isinstance(payload, dict) or payload.get("status") != "ok":
                 return False, "health endpoint reports an unhealthy service"
             return True, "healthy"
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+    except (TimeoutError, aiohttp.ClientError, ValueError):
         return False, "health endpoint is unreachable or returned invalid data"
 
 
@@ -297,7 +297,7 @@ async def _send_notification(
                     response.status,
                 )
                 return False
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        except (TimeoutError, aiohttp.ClientError, ValueError):
             if attempt < 2:
                 await asyncio.sleep(2**attempt)
                 continue

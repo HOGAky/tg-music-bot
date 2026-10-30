@@ -46,7 +46,7 @@ except Exception as e:
 
 def log(msg):
     ts = (
-        datetime.datetime.now(datetime.timezone.utc)
+        datetime.datetime.now(datetime.UTC)
         .astimezone()
         .strftime("%Y-%m-%d %H:%M:%S")
     )

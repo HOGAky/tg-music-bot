@@ -1,612 +1,98 @@
-<!doctype html>
-<html lang="ru"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0,
+      maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Музыка</title>
-<style>
-:root{--bg:var(--tg-theme-bg-color,#fff);--bg2:var(--tg-theme-secondary-bg-color,#f0f0f0);
---fg:var(--tg-theme-text-color,#000);--hint:var(--tg-theme-hint-color,#999);
---accent:var(--tg-theme-button-color,#3390ec);--accent-fg:var(--tg-theme-button-text-color,#fff)}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,system-ui,'Segoe UI',Roboto,sans-serif;margin:0;background:var(--bg);color:var(--fg);padding-bottom:92px;user-select:none}
-button{border:0;background:none;color:var(--fg);font-size:20px;padding:6px;cursor:pointer}
-input{font-family:inherit;color:var(--fg)}
-h3{margin:18px 14px 6px;font-size:15px;opacity:.65}
-
-/* шапка */
-#hdr{position:sticky;top:0;z-index:4;background:var(--bg);padding:10px 14px 0;box-shadow:0 1px 0 rgba(128,128,128,.15)}
-#hdr .ttl{font-size:20px;font-weight:800;margin-bottom:8px}
-#tabs{display:flex;gap:4px}
-#tabs .tab{flex:1;text-align:center;padding:9px 0;border-radius:10px 10px 0 0;opacity:.55;font-weight:600;cursor:pointer}
-#tabs .tab.on{opacity:1;background:var(--bg2)}
-
-/* ряды треков */
-.track{display:flex;align-items:center;gap:11px;padding:8px 14px;cursor:pointer}
-.track:active{background:var(--bg2)}
-.track .cov{width:44px;height:44px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:17px}
-.track .t{flex:1;min-width:0}.t1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
-.t2{opacity:.55;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.track.playing .t1{color:var(--accent)}
-.track .more{opacity:.55;font-size:20px;padding:4px 2px}
-.pill{display:inline-block;margin:6px 14px 2px;padding:7px 14px;border-radius:20px;background:var(--bg2);font-size:13.5px;cursor:pointer}
-.pill:active{opacity:.7}
-.card{display:flex;align-items:center;gap:11px;margin:4px 14px;padding:10px;border-radius:12px;background:var(--bg2);cursor:pointer}
-.card:active{opacity:.75}
-.card .ic{width:44px;height:44px;border-radius:9px;background:var(--accent);color:var(--accent-fg);display:flex;align-items:center;justify-content:center;font-size:19px}
-
-/* поиск */
-#searchbox{margin:8px 14px}
-#q{width:100%;padding:11px 14px;border-radius:11px;border:1px solid rgba(128,128,128,.25);background:var(--bg2);outline:none;font-size:15px}
-
-/* редактор плейлиста */
-#plhead{padding:16px 14px 4px;display:flex;align-items:center;gap:12px}
-#plname{font-size:20px;font-weight:800;flex:1}
-.placts{display:flex;gap:2px}
-#plactions{display:flex;flex-wrap:wrap;gap:6px;padding:6px 14px}
-
-/* мини-плеер */
-#bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg2);display:none;cursor:pointer;z-index:5;box-shadow:0 -2px 14px rgba(0,0,0,.18)}
-#bar .line{height:2px;background:rgba(128,128,128,.3)}
-#bar .fill{height:100%;width:0;background:var(--accent)}
-#bar .row{display:flex;align-items:center;gap:10px;padding:8px 12px}
-#bar .cov{width:42px;height:42px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:16px}
-#bar .meta{flex:1;min-width:0}.m1{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.m2{font-size:12px;opacity:.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#wavechip{position:absolute;top:-20px;left:12px;font-size:11px;background:var(--accent);color:var(--accent-fg);border-radius:10px;padding:2px 9px;display:none}
-
-/* полноэкранный плеер */
-#full{position:fixed;inset:0;background:var(--bg);z-index:10;display:none;flex-direction:column;padding:12px 22px calc(14px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .25s ease}
-#full.open{transform:translateY(0)}
-#full .top{display:flex;align-items:center;justify-content:space-between}
-#full .top .lbl{font-size:11.5px;letter-spacing:1px;opacity:.5;text-transform:uppercase}
-#cover{width:min(76vw,300px);aspect-ratio:1;border-radius:18px;margin:14px auto 16px;display:flex;align-items:center;justify-content:center;font-size:78px;color:rgba(255,255,255,.85);font-weight:800;box-shadow:0 14px 40px rgba(0,0,0,.35)}
-#frow{display:flex;align-items:center;justify-content:center;gap:6px}
-#ftitle{font-size:19px;font-weight:700;text-align:center;line-height:1.25}
-#fartist{font-size:14.5px;opacity:.6;text-align:center;margin-top:3px}
-#seekwrap{margin:18px 2px 0}
-#seek{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:rgba(128,128,128,.3);outline:none}
-#seek::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent)}
-#times{display:flex;justify-content:space-between;font-size:11.5px;opacity:.55;font-variant-numeric:tabular-nums}
-#fctrl{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
-#fctrl .mid{font-size:29px}
-#fctrl .big{width:62px;height:62px;border-radius:50%;background:var(--accent);color:var(--accent-fg);font-size:27px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.25)}
-#fctrl .on{color:var(--accent)}
-#vol{margin-top:8px;display:flex;align-items:center;gap:10px;opacity:.7}
-#vol input{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;background:rgba(128,128,128,.3)}
-#vol input::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent)}
-#qhead{margin:16px 0 2px;font-size:13.5px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
-#qhead .x{font-size:13px;opacity:.5;font-weight:400;cursor:pointer}
-#queue{flex:1;overflow-y:auto;margin:0 -22px;padding:0 22px}
-#queue .track{padding:6px 0}
-#queue .qnum{width:20px;font-size:11.5px;opacity:.45;text-align:center;flex:none}
-#lyrics{display:none;flex:1;overflow-y:auto;margin-top:10px;padding:12px;border-radius:12px;background:var(--bg2)}
-.lyrline{padding:4px 0;opacity:.42;font-size:14.5px;line-height:1.45}
-.lyrline.on{opacity:1;color:var(--accent);font-weight:700}
-#fartist{cursor:pointer}
-#schist{display:none;padding:4px 14px;flex-wrap:wrap;gap:6px}
-
-/* экшен-лист и модалка */
-#sheetbg,#modalbg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:none}
-#sheet{position:fixed;left:0;right:0;bottom:0;background:var(--bg);z-index:21;border-radius:16px 16px 0 0;padding:10px 0 calc(14px + env(safe-area-inset-bottom))}
-#sheet .snote{padding:2px 18px 8px;font-size:13px;opacity:.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.act{display:flex;align-items:center;gap:14px;padding:12px 18px;font-size:15.5px;cursor:pointer}
-.act:active{background:var(--bg2)}
-#modal{position:fixed;left:50%;top:34%;transform:translateX(-50%);background:var(--bg);z-index:21;border-radius:14px;padding:18px;width:min(88vw,340px);box-shadow:0 10px 40px rgba(0,0,0,.35)}
-#modal .mt{font-weight:700;margin-bottom:10px}
-#modal input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(128,128,128,.3);background:var(--bg2);outline:none;font-size:15px}
-#modal .mb{display:flex;justify-content:flex-end;gap:4px;margin-top:12px}
-#modal .mb button{color:var(--accent);font-size:15px;font-weight:600}
-#toast{position:fixed;bottom:104px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.78);color:#fff;font-size:13.5px;border-radius:18px;padding:8px 16px;z-index:30;display:none;max-width:86vw;text-align:center}
-.empty{padding:26px 20px;text-align:center;opacity:.55;font-size:14px;line-height:1.5}
-#main{padding-top:6px}
-</style></head><body>
-<div id="hdr">
-  <div class="ttl">🎵 Музыка</div>
-  <div id="tabs">
-    <div class="tab on" data-v="home" onclick="showView('home')">Главная</div>
-    <div class="tab" data-v="search" onclick="showView('search')">Поиск</div>
-  </div>
-</div>
-<div id="main">
-  <div id="vHome">
-    <div id="histwrap" style="display:none"><h3>🕒 Недавно</h3><div id="hist"></div></div>
-    <h3>🔥 Чарт</h3><div id="chart"></div>
-    <h3>❤️ Избранное</h3><div id="favs"></div>
-    <h3>📁 Плейлисты</h3><div id="pls"></div>
-    <div class="pill" onclick="newPlaylistDialog()">＋ Создать плейлист</div>
-  </div>
-  <div id="vSearch" style="display:none">
-    <div id="searchbox"><input id="q" placeholder="Трек, исполнитель…" autocomplete="off"></div>
-    <div id="schist"></div>
-    <div id="sresults"><div class="empty">Что найдём?<br>Результаты можно слушать, добавлять в плейлисты, запускать от них волну и скачивать.</div></div>
-  </div>
-  <div id="vPl" style="display:none"></div>
-  <div id="vArtist" style="display:none"></div>
-</div>
-
-<div id="bar" onclick="openPlayer()">
-  <div class="line"><div class="fill" id="miniFill"></div></div>
-  <div id="wavechip">📻 Волна</div>
-  <div class="row">
-    <div class="cov" id="miniCov">♪</div>
-    <div class="meta"><div class="m1" id="miniTitle"></div><div class="m2" id="miniArtist"></div></div>
-    <button id="miniPP" onclick="event.stopPropagation();togglePlay()">▶</button>
-    <button onclick="event.stopPropagation();next(true)">⏭</button>
-  </div>
-</div>
-
-<div id="full">
-  <div class="top">
-    <button onclick="closePlayer()">▼</button>
-    <div class="lbl" id="fullLbl">сейчас играет</div>
-    <button onclick="sheetFor(queue[idx], event)">⋯</button>
-  </div>
-  <div id="cover">♪</div>
-  <div id="frow">
-    <button id="like" onclick="toggleLike(queue[idx])">🤍</button>
-    <div style="flex:1"><div id="ftitle"></div><div id="fartist" onclick="openArtist(queue[idx]&&queue[idx].artist)"></div></div>
-    <button title="текст" onclick="toggleLyrics()">📝</button>
-    <button title="скачать" onclick="downloadTrack(queue[idx])">⬇️</button>
-  </div>
-  <div id="lyrics"></div>
-  <div id="seekwrap">
-    <input type="range" id="seek" min="0" max="1000" value="0" oninput="seekInput(this.value)">
-    <div id="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
-  </div>
-  <div id="fctrl">
-    <button class="mid" id="shuf" onclick="toggleShuffle()">🔀</button>
-    <button class="mid" onclick="prev()">⏮</button>
-    <div class="big" id="bigPP" onclick="togglePlay()">▶</div>
-    <button class="mid" onclick="next(true)">⏭</button>
-    <button class="mid" id="rep" onclick="toggleRepeat()">🔁</button>
-  </div>
-  <div id="vol">🔉<input type="range" id="volR" min="0" max="100" value="80" oninput="setVol(this.value)"></div>
-  <div id="qhead"><span>Очередь · <span id="qcount">0</span></span><span class="x" onclick="clearQueue()">очистить</span></div>
-  <div id="queue"></div>
-</div>
-
-<div id="sheetbg" onclick="closeSheet()"><div id="sheet" onclick="event.stopPropagation()"></div></div>
-<div id="modalbg" onclick="closeModal()"><div id="modal" onclick="event.stopPropagation()">
-  <div class="mt" id="modalTitle"></div>
-  <input id="modalInput">
-  <div class="mb"><button onclick="closeModal()">Отмена</button><button id="modalOk">ОК</button></div>
-</div></div>
-<div id="toast"></div>
-
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script>
-const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
-/* initData добавляем к существующему ?v=… (антикэш), если он есть */
-const qs = (location.search ? location.search + "&" : "?") + "initData=" + encodeURIComponent(tg.initData);
-const $ = id => document.getElementById(id);
-const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const name = t => (t.artist? t.artist+" — " : "") + t.title;
-const fmt = s => { s=Math.max(0,Math.floor(s||0)); return `${s/60|0}:${(s%60+"").padStart(2,"0")}`; };
-const grad = t => { const h=[[217,64],[262,52],[4,72],[26,68],[152,55],[196,60],[318,58],[258,64],[32,75],[356,55]][(t.id||0)%10];
-  return `linear-gradient(135deg,hsl(${h[0]} ${h[1]}%,45%),hsl(${(h[0]+40)%360} ${Math.min(h[1]+6,95)}%,32%))`; };
-const initial = t => ((t.artist||t.title||"♪").trim()[0]||"♪").toUpperCase();
-const covHtml = t => `<div class="cov" style="background:${grad(t)}">${initial(t)}</div>`;
+<link rel="stylesheet" href="/app/static/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="search-row">
+      <input id="searchInput" type="search" autocomplete="off"
+             placeholder="Название трека или ссылка (Spotify, YouTube, Яндекс…)">
+      <button id="searchBtn" class="icon-btn" title="Искать">🔍</button>
+    </div>
+    <nav id="tabs">
+      <button class="tab active" data-tab="search">Поиск</button>
+      <button class="tab" data-tab="playlists">Плейлисты</button>
+      <button class="tab" data-tab="favorites">Избранное</button>
+      <button class="tab" data-tab="top">Топ</button>
+    </nav>
+  </header>
 
-function toast(msg){ const t=$("toast"); t.textContent=msg; t.style.display="block";
-  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none", 2600); }
+  <main id="content"></main>
+</div>
 
-/* ---------- api ---------- */
-async function api(path){ const r=await fetch(path+qs); if(!r.ok) throw new Error(await r.text()); return r.json(); }
-async function post(path, body){
-  const r=await fetch(path+qs,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
-  if(!r.ok) throw new Error(await r.text()); return r.json();
-}
-async function downloadTrack(t){ if(!t) return;
-  const url = location.origin + "/api/download/" + t.id + qs;
-  try{ tg.openLink(url); }catch(e){ location.href=url; } toast("Скачивание началось ⬇️"); }
+<!-- Мини-плеер -->
+<div id="miniPlayer" class="hidden">
+  <div class="mp-progress"><div id="mpBar"></div></div>
+  <div class="mp-inner">
+    <div class="mp-info" id="mpInfo">
+      <div id="mpTitle" class="mp-title">—</div>
+      <div id="mpArtist" class="mp-artist">—</div>
+    </div>
+    <button id="mpPlay" class="icon-btn">▶️</button>
+    <button id="mpNext" class="icon-btn">⏭</button>
+    <button id="mpExpand" class="icon-btn">⌃</button>
+  </div>
+</div>
 
-/* ---------- состояние ---------- */
-let lib={favorites:[],playlists:[]}, favIds=new Set();
-let queue=[], idx=-1, shuffle=false, repeat=false, waveMode=false;
-let currentPl=null, addModeTo=null, lastSearchQ="";
-const audio = new Audio(); audio.preload="none";
-audio.volume = +(localStorage.volume ?? 0.8); $("volR").value = audio.volume*100;
+<!-- Полноэкранный плеер -->
+<div id="fullPlayer" class="overlay hidden">
+  <div class="fp-top">
+    <button id="fpCollapse" class="icon-btn">⌄</button>
+    <button id="fpLyrics" class="icon-btn" title="Текст">📝</button>
+    <button id="fpRadio" class="icon-btn" title="Радио">📻</button>
+  </div>
+  <div class="fp-cover" id="fpCover">🎵</div>
+  <div class="fp-title" id="fpTitle">—</div>
+  <div class="fp-artist" id="fpArtist">—</div>
+  <div class="fp-seek">
+    <span id="fpCur">0:00</span>
+    <input id="fpSeek" type="range" min="0" max="1000" value="0">
+    <span id="fpDur">0:00</span>
+  </div>
+  <div class="fp-controls">
+    <button id="fpShuffle" class="icon-btn">🔀</button>
+    <button id="fpPrev" class="icon-btn">⏮</button>
+    <button id="fpPlay" class="icon-btn big">▶️</button>
+    <button id="fpNext" class="icon-btn">⏭</button>
+    <button id="fpRepeat" class="icon-btn">🔁</button>
+  </div>
+  <div class="fp-volume">
+    <span>🔈</span>
+    <input id="fpVolume" type="range" min="0" max="100" value="100">
+  </div>
+  <div id="fpQueue" class="fp-queue"></div>
+</div>
 
-function saveQueue(){ try{ localStorage.q = JSON.stringify({ids:queue.map(t=>t.id), idx, title:queue.map(t=>name(t)), pos:audio.currentTime||0}); }catch(e){} }
+<!-- Караоке / текст -->
+<div id="lyricsModal" class="overlay hidden">
+  <div class="lm-top">
+    <div class="lm-head">
+      <div id="lmTitle" class="mp-title">Текст</div>
+      <div id="lmArtist" class="mp-artist"></div>
+    </div>
+    <button id="lmClose" class="icon-btn">✕</button>
+  </div>
+  <div id="lyricsBody" class="lyrics-body"></div>
+</div>
 
-/* ---------- виды ---------- */
-function showView(v){
-  for(const id of ["vHome","vSearch","vPl","vArtist"]) $(id).style.display = (id==="v"+v[0].toUpperCase()+v.slice(1)) ? "" : "none";
-  document.querySelectorAll("#tabs .tab").forEach(e=>e.classList.toggle("on", e.dataset.v===v));
-  tg.BackButton.show(); tg.offEvent("backButtonClicked", onBack); tg.onEvent("backButtonClicked", onBack);
-  if(v==="home") load();
-  if(v==="search") renderSearchHist();
-}
-function onBack(){
-  if(addModeTo){ addModeTo=null; openPlEditor(currentPl); return; }
-  showView("home");
-}
+<!-- Шторка выбора плейлиста -->
+<div id="sheet" class="overlay sheet hidden">
+  <div class="sheet-card">
+    <div class="sheet-title">Добавить в плейлист</div>
+    <div id="sheetList"></div>
+    <button id="sheetCancel" class="btn">Отмена</button>
+  </div>
+</div>
 
-/* ---------- главная ---------- */
-async function load(){
-  try{
-    lib = await api("/api/library");
-    favIds = new Set(lib.favorites.map(t=>t.id));
-    try{ const h = await api("/api/history");
-      $("histwrap").style.display = h.recent.length ? "" : "none";
-      const hh=$("hist"); hh.innerHTML="";
-      h.recent.forEach((t,i)=>hh.appendChild(trackRow(t, ()=>playList(h.recent,i))));
-    }catch(e){}
-    render(); loadChart();
-  }catch(e){ tg.showAlert("Ошибка авторизации — открой плеер через кнопку меню в боте"); }
-}
-function trackRow(t, onPlay, opts={}){
-  const d = document.createElement("div"); d.className = "track"+(opts.playing?" playing":"");
-  d.innerHTML = `${covHtml(t)}<div class="t"><div class="t1">${esc(name(t))}</div>
-    <div class="t2">${esc(opts.sub ?? (t.artist||""))}</div></div>`;
-  d.onclick = onPlay;
-  if(opts.menu!==false){ const m=document.createElement("div"); m.className="more"; m.textContent="⋯";
-    m.onclick=e=>{e.stopPropagation();sheetFor(t,e);}; d.appendChild(m); }
-  return d;
-}
-function render(){
-  const f=$("favs"); f.innerHTML="";
-  if(!lib.favorites.length) f.innerHTML = `<div class="empty">Пусто. Жми 🤍 у играющего трека<br>или ⋯ у любого результата поиска.</div>`;
-  lib.favorites.forEach(t=>f.appendChild(trackRow(t, ()=>playList(lib.favorites, lib.favorites.indexOf(t)))));
-  const p=$("pls"); p.innerHTML="";
-  lib.playlists.forEach(pl=>{
-    const c=document.createElement("div"); c.className="card";
-    c.innerHTML = `<div class="ic">📁</div><div class="t" style="flex:1;min-width:0">
-      <div class="t1">${esc(pl.name)}</div><div class="t2">${pl.tracks.length} треков</div></div>`;
-    c.onclick=()=>openPlEditor(pl);
-    const pp=document.createElement("button"); pp.textContent="▶"; pp.onclick=e=>{e.stopPropagation();playList(pl.tracks,0);openPlayer();};
-    c.appendChild(pp); p.appendChild(c);
-  });
-}
-
-/* ---------- поиск ---------- */
-let searchTimer=null;
-$("q").addEventListener("input", ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(runSearch, 450); });
-function renderSearchHist(){
-  const h = JSON.parse(localStorage.searchHist||"[]"); const box=$("schist");
-  box.innerHTML=""; box.style.display = h.length? "flex":"none";
-  h.forEach(q=>{ const c=document.createElement("div"); c.className="pill"; c.textContent="🕒 "+q;
-    c.onclick=()=>{ $("q").value=q; runSearch(); }; box.appendChild(c); });
-}
-async function runSearch(){
-  const q = $("q").value.trim();
-  if(!q) return;
-  if(addModeTo){ toast("Ищи трек — добавлю в «"+addModeTo.name+"»"); }
-  const box=$("sresults"); box.innerHTML = `<div class="empty">Ищу «${esc(q)}»…</div>`;
-  try{
-    const data = await api("/api/search?q="+encodeURIComponent(q));
-    box.innerHTML="";
-    if(!data.results.length){ box.innerHTML=`<div class="empty">Ничего не нашлось 😔</div>`; return; }
-    if(!addModeTo){
-      const h = JSON.parse(localStorage.searchHist||"[]").filter(x=>x!==q);
-      h.unshift(q); localStorage.searchHist = JSON.stringify(h.slice(0,8)); renderSearchHist();
-    }
-    data.results.forEach(t=>box.appendChild(trackRow(t, ()=>{ if(addModeTo) addToPlaylist(t); else playList(data.results, data.results.indexOf(t)); },
-      {menu:true, sub: t.artist + (t.favorite? "  ·  ❤️":"")})));
-  }catch(e){ box.innerHTML=`<div class="empty">Поиск не удался, попробуй ещё раз</div>`; }
-}
-
-/* ---------- чарт ---------- */
-async function loadChart(){
-  try{
-    const d = await api("/api/chart"); const c=$("chart"); c.innerHTML="";
-    if(!d.chart.length){ c.innerHTML=`<div class="empty">Ещё никто ничего не слушал</div>`; return; }
-    d.chart.forEach((t,i)=>{
-      const row = trackRow(t, ()=>playList(d.chart, d.chart.indexOf(t)), {sub:`${t.plays} прослушиваний`});
-      const n=document.createElement("div"); n.className="qnum"; n.textContent=i+1; row.prepend(n);
-      c.appendChild(row);
-    });
-  }catch(e){}
-}
-
-/* ---------- артист ---------- */
-async function openArtist(a){
-  if(!a) return;
-  closePlayer(); showView("artist");
-  const v=$("vArtist"); v.innerHTML = `<div class="empty">Ищу треки «${esc(a)}»…</div>`;
-  try{
-    const d = await api("/api/artist?q="+encodeURIComponent(a));
-    window.artistTracks = d.results;
-    v.innerHTML = `<div id="plhead"><button onclick="showView('home')">←</button>
-        <div id="plname">${esc(d.artist)}</div></div>
-      <div id="plactions">
-        <div class="pill" onclick="playList(artistTracks,0);openPlayer()">▶ Слушать всё</div>
-        ${d.results.length? `<div class="pill" onclick="startWave(artistTracks[0])">📻 Волна</div>`:""}
-      </div><div id="artracks"></div>`;
-    const box=v.querySelector("#artracks"); box.innerHTML="";
-    if(!d.results.length) box.innerHTML=`<div class="empty">Треков не нашлось</div>`;
-    d.results.forEach(t=>box.appendChild(trackRow(t, ()=>playList(d.results, d.results.indexOf(t)))));
-  }catch(e){ v.innerHTML=`<div class="empty">Не получилось, попробуй ещё раз</div>`; }
-}
-
-/* ---------- плейлисты ---------- */
-function newPlaylistDialog(){ modal("Название плейлиста", "", async v=>{
-  if(!v.trim()) return;
-  const pl = await post("/api/playlist/create", {name: v.trim()});
-  await load(); openPlEditor(pl); toast("Плейлист создан");
-});}
-function openPlEditor(pl){
-  currentPl = pl; showView("pl");
-  const v = $("vPl");
-  v.innerHTML = `<div id="plhead">
-      <button onclick="showView('home')">←</button>
-      <div id="plname">${esc(pl.name)}</div>
-      <div class="placts">
-        <button title="переименовать" onclick="renamePl()">✏️</button>
-        <button title="удалить" onclick="deletePl()">🗑</button>
-      </div></div>
-    <div id="plactions">
-      <div class="pill" onclick="playList(currentPl.tracks,0);openPlayer()">▶ Слушать всё</div>
-      <div class="pill" onclick="startAddMode()">＋ Добавить треки</div>
-      <div class="pill" onclick="sharePl()">↗️ Поделиться</div>
-    </div><div id="pltracks"></div>`;
-  renderPlTracks();
-}
-function renderPlTracks(){
-  const box=$("pltracks"); box.innerHTML="";
-  if(!currentPl.tracks.length){ box.innerHTML=`<div class="empty">Пусто.<br>«＋ Добавить треки» — найдёшь и добавишь.</div>`; return; }
-  currentPl.tracks.forEach((t,i)=>{
-    const d = trackRow(t, ()=>playList(currentPl.tracks,i));
-    const up=document.createElement("button"); up.textContent="⬆"; up.title="выше";
-    up.onclick=e=>{e.stopPropagation();moveTrack(t,-1);};
-    const down=document.createElement("button"); down.textContent="⬇"; down.title="ниже";
-    down.onclick=e=>{e.stopPropagation();moveTrack(t,1);};
-    const x=document.createElement("button"); x.textContent="✖"; x.title="убрать";
-    x.onclick=async e=>{ e.stopPropagation();
-      try{ await post(`/api/playlist/${currentPl.id}/remove`, {track_id:t.id});
-        currentPl.tracks.splice(i,1); renderPlTracks(); load(); toast("Убрано");
-      }catch(err){ toast("Не удалось убрать"); } };
-    d.appendChild(up); d.appendChild(down); d.appendChild(x); box.appendChild(d);
-  });
-}
-async function renamePl(){ modal("Новое название", currentPl.name, async v=>{
-  if(!v.trim()) return;
-  await post(`/api/playlist/${currentPl.id}/rename`, {name: v.trim()});
-  currentPl.name = v.trim(); await load(); openPlEditor(currentPl); toast("Переименовано");
-});}
-async function deletePl(){
-  await post(`/api/playlist/${currentPl.id}/delete`, {});
-  await load(); showView("home"); toast("Плейлист удалён");
-}
-function startAddMode(){ addModeTo = currentPl; showView("search"); $("q").value=lastSearchQ;
-  $("sresults").innerHTML=`<div class="empty">Ищи треки — тапни по любому, добавлю в «${esc(currentPl.name)}»</div>`; $("q").focus(); }
-async function addToPlaylist(t){
-  try{ const r = await post(`/api/playlist/${addModeTo.id}/add`, {track_id: t.id});
-    toast(r.added ? "Добавлено ✅" : "Уже есть в плейлисте");
-    if(r.added){ addModeTo.tracks.push(t); }
-  }catch(e){ toast("Не удалось добавить"); }
-}
-
-/* ---------- экшен-лист ---------- */
-function sheetFor(t, e){
-  if(!t) return; if(e) e.stopPropagation();
-  const fav = favIds.has(t.id);
-  const acts = [
-    ["▶️", "Слушать", ()=>{ playList([t],0); openPlayer(); }],
-    ["⏭", "Играть следующим", ()=>{ if(idx<0) return playList([t],0); queue.splice(idx+1,0,t); renderQueue(); saveQueue(); toast("Играет следующим"); }],
-    ["📻", "Запустить волну", ()=>startWave(t)],
-    [fav?"💔":"❤️", fav?"Убрать из избранного":"В избранное", ()=>toggleLike(t)],
-    ["⬇️", "Скачать mp3", ()=>downloadTrack(t)],
-    ["📝", "Текст песни", ()=>{ openPlayer(); setTimeout(toggleLyrics, 300); }],
-    ["↗️", "Поделиться", ()=>shareTrack(t)],
-    ["📁", "В плейлист…", ()=>pickPlaylist(t)],
-  ];
-  const s=$("sheet"); s.innerHTML = `<div class="snote">${esc(name(t))}</div>` +
-    acts.map((a,i)=>`<div class="act" data-i="${i}"><span>${a[0]}</span><span>${a[1]}</span></div>`).join("");
-  s.querySelectorAll(".act").forEach(el=>el.onclick=()=>{ closeSheet(); acts[+el.dataset.i][2](); });
-  $("sheetbg").style.display="block"; tg.HapticFeedback.impactOccurred("light");
-}
-function closeSheet(){ $("sheetbg").style.display="none"; }
-function pickPlaylist(t){
-  const s=$("sheet"); const items = lib.playlists.map(pl=>["📁", esc(pl.name), async()=>{
-    try{ const r=await post(`/api/playlist/${pl.id}/add`,{track_id:t.id}); toast(r.added?"Добавлено ✅":"Уже есть"); }
-    catch(e){ toast("Не удалось добавить"); } }]);
-  items.push(["＋","Новый плейлист и добавить…", async()=>{
-    modal("Название плейлиста", "", async v=>{ if(!v.trim()) return;
-      const pl = await post("/api/playlist/create", {name: v.trim()});
-      await post(`/api/playlist/${pl.id}/add`, {track_id: t.id});
-      await load(); toast("Добавлено ✅"); }); }]);
-  s.innerHTML = `<div class="snote">Добавить «${esc(name(t))}» в:</div>` +
-    items.map((a,i)=>`<div class="act" data-i="${i}"><span>${a[0]}</span><span>${a[1]}</span></div>`).join("");
-  s.querySelectorAll(".act").forEach(el=>el.onclick=()=>{ closeSheet(); items[+el.dataset.i][2](); });
-  $("sheetbg").style.display="block";
-}
-
-/* ---------- лайки и скачивание ---------- */
-async function toggleLike(t){ if(!t) return;
-  try{ const r = await post("/api/favorites/toggle", {track_id:t.id});
-    r.favorite ? favIds.add(t.id) : favIds.delete(t.id);
-    updateLikeIcon(t); toast(r.favorite ? "❤️ В избранном" : "Убрано из избранного"); load();
-  }catch(e){ toast("Не получилось"); }
-}
-function updateLikeIcon(t){ $("like").textContent = favIds.has(t.id) ? "❤️" : "🤍"; }
-
-/* ---------- воспроизведение ---------- */
-async function playAt(i){
-  if(!queue.length) return;
-  idx = Math.max(0, Math.min(i, queue.length-1)); wantPlay=true;
-  const t = queue[idx];
-  $("miniTitle").textContent = name(t); $("miniArtist").textContent = t.artist||"";
-  $("miniCov").style.background = grad(t); $("miniCov").textContent = initial(t);
-  $("bar").style.display = "block"; setPlayIcon("⌛");
-  updateLikeIcon(t);
-  audio.src = `/api/stream/${t.id}${qs}`;
-  try{ await audio.play(); }catch(e){ toast("Трек пока недоступен — включи его один раз в чате"); setPlayIcon("▶"); }
-  if("mediaSession" in navigator && window.MediaMetadata){
-    navigator.mediaSession.metadata = new MediaMetadata({title:t.title, artist:t.artist||"", album:"Музыка"});
-  }
-  renderQueue(); highlightFull(t); saveQueue();
-  lyrState=null;
-  if($("lyrics").style.display==="flex") loadLyrics(t);
-}
-function setPlayIcon(s){ $("miniPP").textContent=s; $("bigPP").textContent=s; }
-function togglePlay(){ if(idx<0) return; audio.paused ? audio.play().catch(()=>{}) : audio.pause(); }
-audio.addEventListener("playing", ()=>setPlayIcon("⏸"));
-audio.addEventListener("pause",   ()=>setPlayIcon("▶"));
-audio.addEventListener("waiting", ()=>setPlayIcon("⌛"));
-audio.addEventListener("loadedmetadata", ()=>{ $("dur").textContent = fmt(audio.duration); saveQueue(); });
-audio.addEventListener("timeupdate", ()=>{
-  if(!audio.duration) return;
-  $("miniFill").style.width = (audio.currentTime/audio.duration*100)+"%";
-  if(!seeking){ $("seek").value = audio.currentTime/audio.duration*1000; $("cur").textContent = fmt(audio.currentTime); }
-  $("dur").textContent = "-"+fmt(audio.duration-audio.currentTime);
-  updateLyric();
-});
-audio.addEventListener("error", ()=>{ if(idx>=0 && audio.src){ toast("Трек недоступен — попробуй позже"); setPlayIcon("▶"); } });
-audio.addEventListener("ended", async ()=>{
-  if(repeat) return playAt(idx);
-  if(idx+1 < queue.length) return playAt(idx+1);
-  if(waveMode && queue.length){ try{ await extendWave(queue[idx]); return playAt(idx+1); }catch(e){} }
-  setPlayIcon("▶");
-});
-function next(manual){
-  if(!queue.length) return;
-  if(shuffle && queue.length>1){ let r; do{ r=Math.floor(Math.random()*queue.length); }while(r===idx); return playAt(r); }
-  if(idx+1 < queue.length) return playAt(idx+1);
-  if(waveMode && queue.length){ extendWave(queue[idx]).then(()=>playAt(idx+1)).catch(()=>{}); return; }
-  if(manual || repeat) playAt(0);
-}
-function prev(){ if(audio.currentTime>3){ audio.currentTime=0; return; } playAt(Math.max(0,idx-1)); }
-function toggleShuffle(){ shuffle=!shuffle; $("shuf").classList.toggle("on",shuffle); tg.HapticFeedback.impactOccurred("light"); }
-function toggleRepeat(){ repeat=!repeat; $("rep").classList.toggle("on",repeat); tg.HapticFeedback.impactOccurred("light"); }
-function setVol(v){ audio.volume=v/100; localStorage.volume=v/100; }
-function clearQueue(){ queue=[]; idx=-1; audio.pause(); audio.removeAttribute("src"); $("bar").style.display="none"; closePlayer(); waveMode=false; $("wavechip").style.display="none"; }
-
-/* ---------- волна ---------- */
-async function startWave(t){
-  if(!t) return;
-  toast("📻 Подбираю волну…");
-  try{
-    const data = await api(`/api/radio/${t.id}`);
-    queue = [t, ...data.results]; idx = -1; waveMode = true;
-    $("wavechip").style.display = "inline-block"; $("fullLbl").textContent = "радио по треку";
-    openPlayer(); await playAt(0);
-  }catch(e){ toast("Волна не собралась, попробуй ещё раз"); }
-}
-async function extendWave(seed){
-  const data = await api(`/api/radio/${seed.id}`);
-  const known = new Set(queue.map(x=>x.id));
-  const fresh = data.results.filter(t=>!known.has(t.id));
-  if(!fresh.length) throw new Error("wave exhausted");
-  queue.push(...fresh); renderQueue(); saveQueue();
-}
-
-/* ---------- перемотка, громкость, restore ---------- */
-let seeking=false;
-function seekInput(v){ if(!audio.duration) return; seeking=true; $("cur").textContent = fmt(v/1000*audio.duration); }
-$("seek").addEventListener("change", e=>{ if(audio.duration) audio.currentTime = e.target.value/1000*audio.duration; seeking=false; });
-if("mediaSession" in navigator){
-  navigator.mediaSession.setActionHandler("play",  ()=>audio.play());
-  navigator.mediaSession.setActionHandler("pause", ()=>audio.pause());
-  navigator.mediaSession.setActionHandler("previoustrack", prev);
-  navigator.mediaSession.setActionHandler("nexttrack", ()=>next(true));
-}
-
-/* ---------- полноэкранный плеер ---------- */
-function highlightFull(t){
-  $("ftitle").textContent = t.title; $("fartist").textContent = t.artist||"";
-  $("cover").style.background = grad(t); $("cover").textContent = initial(t);
-  updateLikeIcon(t);
-}
-function openPlayer(){ if(idx<0) return; $("full").style.display="flex";
-  requestAnimationFrame(()=>$("full").classList.add("open"));
-  tg.BackButton.show(); tg.offEvent("backButtonClicked", onBack); tg.onEvent("backButtonClicked", closePlayer);
-  renderQueue(); tg.HapticFeedback.impactOccurred("light"); }
-function closePlayer(){ $("full").classList.remove("open");
-  setTimeout(()=>$("full").style.display="none",260); tg.BackButton.hide();
-  tg.offEvent("backButtonClicked", closePlayer); tg.onEvent("backButtonClicked", onBack); }
-function renderQueue(){
-  const q=$("queue"); q.innerHTML=""; $("qcount").textContent = queue.length;
-  queue.forEach((t,i)=>{
-    const d = trackRow(t, ()=>playAt(i), {playing: i===idx, menu:false});
-    const n=document.createElement("div"); n.className="qnum"; n.textContent = i===idx?"▶":(i+1);
-    d.prepend(n); q.appendChild(d);
-  });
-}
-
-/* ---------- текст песни (караоке) ---------- */
-let lyrState=null;
-function toggleLyrics(){
-  const L=$("lyrics"); const open = L.style.display!=="flex";
-  L.style.display = open? "flex":"none";
-  $("cover").style.display = open? "none":"flex";
-  $("qhead").style.display = open? "none":"flex";
-  $("queue").style.display = open? "none":"block";
-  if(open) loadLyrics(queue[idx]);
-}
-async function loadLyrics(t){
-  if(!t) return; lyrState=null;
-  const L=$("lyrics"); L.innerHTML = `<div class="empty">Ищу текст…</div>`;
-  try{
-    const d = await api(`/api/lyrics/${t.id}`);
-    if(d.synced && d.synced.length){ lyrState={synced:d.synced};
-      L.innerHTML = d.synced.map((ln,i)=>`<div class="lyrline" data-i="${i}">${esc(ln[1])}</div>`).join("");
-      updateLyric();
-    } else if(d.plain){
-      L.innerHTML = d.plain.split("\n").map(l=>`<div class="lyrline">${esc(l)||"&nbsp;"}</div>`).join("");
-    } else { L.innerHTML = `<div class="empty">Текст не нашёлся 😔</div>`; }
-  }catch(e){ L.innerHTML=`<div class="empty">Текст не нашёлся 😔</div>`; }
-}
-function updateLyric(){
-  if(!lyrState || !audio.duration) return;
-  const cur = audio.currentTime;
-  let act = -1;
-  for(let i=0;i<lyrState.synced.length;i++){ if(lyrState.synced[i][0] <= cur+0.3) act=i; else break; }
-  const L=$("lyrics");
-  L.querySelectorAll(".lyrline.on").forEach(e=>e.classList.remove("on"));
-  if(act>=0){ const el=L.querySelector(`.lyrline[data-i="${act}"]`);
-    if(el){ el.classList.add("on"); el.scrollIntoView({block:"center",behavior:"smooth"}); } }
-}
-
-/* ---------- шеринг ---------- */
-function shareTrack(t){
-  if(!t || !t.source_url){ toast("Ссылка недоступна"); return; }
-  const url = `https://t.me/share/url?url=${encodeURIComponent(t.source_url)}&text=${encodeURIComponent(name(t))}`;
-  try{ tg.openTelegramLink(url); }catch(e){ location.href=url; }
-}
-function sharePl(){
-  if(!currentPl) return;
-  const lines = currentPl.tracks.slice(0,15).map((t,i)=>`${i+1}. ${name(t)}`).join("\n");
-  const text = `📁 «${currentPl.name}» — ${currentPl.tracks.length} треков\n${lines}`;
-  const url = `https://t.me/share/url?url=${encodeURIComponent(location.origin+"/app/")}&text=${encodeURIComponent(text)}`;
-  try{ tg.openTelegramLink(url); }catch(e){ location.href=url; }
-}
-
-/* ---------- перемещение треков в плейлисте ---------- */
-async function moveTrack(t, delta){
-  try{
-    const r = await post(`/api/playlist/${currentPl.id}/move`, {track_id:t.id, delta});
-    if(r.ok){ const arr=currentPl.tracks; const i=arr.findIndex(x=>x.id===t.id); const j=i+delta;
-      if(j>=0 && j<arr.length){ [arr[i],arr[j]]=[arr[j],arr[i]]; renderPlTracks(); } }
-    else toast("Не удалось переместить");
-  }catch(e){ toast("Не удалось переместить"); }
-}
-
-/* ---------- модалка ---------- */
-function modal(title, value, onOk){
-  $("modalTitle").textContent = title; $("modalInput").value = value||"";
-  $("modalbg").style.display="block"; $("modalInput").focus();
-  const ok = $("modalOk"); ok.onclick = async ()=>{ const v=$("modalInput").value; closeModal(); await onOk(v); };
-  $("modalInput").onkeydown = e=>{ if(e.key==="Enter") ok.click(); };
-}
-function closeModal(){ $("modalbg").style.display="none"; }
-
-/* ---------- restore очереди после закрытия ---------- */
-function restore(){
-  try{
-    const saved = JSON.parse(localStorage.q||"null");
-    if(saved && saved.ids && saved.ids.length){
-      queue = saved.ids.map((id,i)=>({id, title:(saved.title||[])[i]||("Трек #"+id), artist:""}));
-      idx = Math.min(saved.idx||0, queue.length-1);
-      const t = queue[idx];
-      $("miniTitle").textContent = name(t); $("miniArtist").textContent = "нажми ▶ для продолжения";
-      $("miniCov").style.background = grad(t); $("miniCov").textContent = initial(t);
-      $("bar").style.display="block";
-      audio.src = `/api/stream/${t.id}${qs}`;
-      audio.addEventListener("loadedmetadata", function once(){ audio.currentTime = saved.pos||0; audio.removeEventListener("loadedmetadata", once); });
-    }
-  }catch(e){}
-}
-
-/* ---------- старт ---------- */
-load(); restore();
-</script></body></html>
+<div id="toast" class="hidden"></div>
+<audio id="audio" preload="auto"></audio>
+<script src="/app/static/app.js"></script>
+</body>
+</html>

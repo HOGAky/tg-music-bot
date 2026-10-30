@@ -23,7 +23,7 @@ class Config(BaseSettings):
 
     # ---- Mini App ----
     WEBAPP_URL: str = ""        # публичный https-адрес вида https://домен/app/
-    API_ENABLED: bool = False   # поднимать ли HTTP-сервер веб-плеера
+    API_ENABLED: bool = True    # поднимать ли HTTP-сервер веб-плеера
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8080
 

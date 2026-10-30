@@ -1,9 +1,12 @@
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonWebApp,
     Message,
     WebAppInfo,
 )
@@ -13,6 +16,7 @@ from database import repo
 from database.session import SessionFactory
 from utils import bust_url
 
+logger = logging.getLogger(__name__)
 router = Router(name="common")
 
 START_TEXT = """🎧 <b>Музыкальный бот</b>
@@ -40,6 +44,15 @@ async def cmd_start(message: Message):
         await repo.get_or_create_user(session, message.from_user.id, message.from_user.username)
     kb = None
     if config.WEBAPP_URL:
+        # системная кнопка меню «Плеер» рядом с полем ввода (для этого чата)
+        try:
+            await message.bot.set_chat_menu_button(
+                chat_id=message.chat.id,
+                menu_button=MenuButtonWebApp(
+                    text="🎵 Плеер",
+                    web_app=WebAppInfo(url=bust_url(config.WEBAPP_URL))))
+        except Exception as e:
+            logger.debug("Не удалось поставить кнопку меню плеера: %s", e)
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🎵 Открыть плеер",
                                  web_app=WebAppInfo(url=bust_url(config.WEBAPP_URL))),
